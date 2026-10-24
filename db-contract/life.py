@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI для БД профиля priest. Вся запись в базу — только через него.
+"""CLI для БД профиля life. Вся запись в базу — только через него.
 
 Примеры:
   life.py metric sleep_hours 6.5 --date 2026-10-22 --note "лёг в 2"
@@ -12,7 +12,7 @@
   life.py tx 1500 --dir out --category food
   life.py journal --mood 6 --energy 5 --text "норм день"
   life.py report --days 14
-  life.py fact city "Нальчик"
+  life.py fact city "Moscow"
   life.py get
 """
 from __future__ import annotations

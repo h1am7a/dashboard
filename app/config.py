@@ -11,7 +11,8 @@ PRIEST_DB = os.getenv("PRIEST_DB", str(BASE_DIR / "db" / "life.db"))
 
 # Auth & Telegram
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ALLOWED_USER_ID = int(os.getenv("ALLOWED_USER_ID", "483445453"))
+_allowed_uid = os.getenv("ALLOWED_USER_ID", "")
+ALLOWED_USER_ID = int(_allowed_uid) if _allowed_uid.isdigit() else None
 DEV_MODE = os.getenv("DEV_MODE", "true").lower() in ("true", "1", "yes")
 
 # App settings

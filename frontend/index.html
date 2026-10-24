@@ -218,7 +218,7 @@
     ===================================================================== */
     let currentTab = 'today';
     let activeBarSelection = null;
-    let selectedWorkoutDayIndex = 0;
+    let selectedWorkoutDayIndex = 6;
     let sleepPeriod = 7;
 
     let cachedToday = null;
@@ -282,7 +282,7 @@
         <div class="ios-widget-card text-center py-10 space-y-3">
           <div class="text-[var(--accent-orange)] text-sm font-semibold">Failed to load data</div>
           <div class="text-xs text-[var(--label-secondary)]">${msg}</div>
-          <button onclick="${retryFn}" class="px-4 py-2 rounded-xl text-xs font-semibold bg-[var(--accent-blue)] text-black mt-2">
+          <button onclick="${retryFn}" class="px-4 py-2 rounded-xl text-xs font-semibold bg-[var(--accent-blue)] text-black mt-2 active:scale-95 transition-transform">
             Retry
           </button>
         </div>
@@ -355,14 +355,15 @@
 
       // Group 126 hitmap days into 18 weeks (7 days each)
       const weeks = [];
-      for (let i = 0; i < d.hitmap.length; i += 7) {
-        weeks.push(d.hitmap.slice(i, i + 7));
+      const hitmapList = d.hitmap || [];
+      for (let i = 0; i < hitmapList.length; i += 7) {
+        weeks.push(hitmapList.slice(i, i + 7));
       }
 
       const heatmapColsHtml = weeks.map(weekDays => {
         const cellsHtml = weekDays.map(item => {
           if (!item || item.percent === null) {
-            return `<div title="Empty day" style="width: 100%; aspect-ratio: 1; border-radius: 2px; background: transparent; border: 0.5px dashed var(--separator);"></div>`;
+            return `<div title="No data" style="width: 100%; aspect-ratio: 1; border-radius: 2px; background: transparent; border: 0.5px dashed var(--separator);"></div>`;
           }
           const bg = getHeatmapColor(item.percent);
           const workoutDot = item.has_workout ? `<div style="width: 3.5px; height: 3.5px; border-radius: 50%; background: rgba(0,0,0,0.5);"></div>` : '';
@@ -389,63 +390,74 @@
 
       const monthRowHtml = monthLabels.map(slot => `<div style="flex: 1; text-align: left; overflow: visible; white-space: nowrap;">${slot}</div>`).join('');
 
-      // Checklist items from array (habits have no button, tasks have Done)
-      const itemsHtml = d.score.items.map(it => {
-        if (it.type === 'habit') {
-          return `
-            <div class="flex items-center justify-between p-3 rounded-2xl bg-[var(--bg-tertiary)] text-xs border border-[var(--separator)]">
-              <div class="flex items-center gap-3">
-                <span class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${it.done ? 'bg-[var(--label-primary)] text-[var(--bg-system)]' : 'border border-dashed border-[var(--label-tertiary)]'}">
-                  ${it.done ? '&#10003;' : ''}
-                </span>
-                <span class="${it.done ? 'text-[var(--label-primary)]' : 'text-[var(--label-secondary)]'}">${it.title}</span>
+      // Checklist items from array
+      let itemsHtml = '';
+      if (!d.score.items || d.score.items.length === 0) {
+        itemsHtml = `<div class="text-xs text-[var(--label-secondary)] py-4 text-center">No checklist items scheduled</div>`;
+      } else {
+        itemsHtml = d.score.items.map(it => {
+          if (it.type === 'habit') {
+            return `
+              <div class="flex items-center justify-between p-3 rounded-2xl bg-[var(--bg-tertiary)] text-xs border border-[var(--separator)]">
+                <div class="flex items-center gap-3">
+                  <span class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${it.done ? 'bg-[var(--label-primary)] text-[var(--bg-system)]' : 'border border-dashed border-[var(--label-tertiary)]'}">
+                    ${it.done ? '&#10003;' : ''}
+                  </span>
+                  <span class="${it.done ? 'text-[var(--label-primary)]' : 'text-[var(--label-secondary)]'}">${it.title}</span>
+                </div>
+                <span class="text-[10px] font-medium text-[var(--label-tertiary)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 rounded-full">habit</span>
               </div>
-              <span class="text-[10px] font-medium text-[var(--label-tertiary)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 rounded-full">habit</span>
-            </div>
-          `;
-        } else {
-          const taskId = it.key.replace('task:', '');
-          return `
-            <div id="task-${taskId}" class="flex items-center justify-between p-3 rounded-2xl bg-[var(--bg-tertiary)] text-xs border border-[var(--separator)]">
-              <div class="flex items-center gap-3">
-                <span class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${it.done ? 'bg-[var(--accent-green)] text-black' : 'border border-[var(--label-tertiary)]'}">
-                  ${it.done ? '&#10003;' : ''}
-                </span>
-                <span class="${it.done ? 'line-through text-[var(--label-tertiary)]' : 'text-[var(--label-primary)] font-medium'}">${it.title}</span>
+            `;
+          } else {
+            const taskId = it.key.replace('task:', '');
+            return `
+              <div id="task-${taskId}" class="flex items-center justify-between p-3 rounded-2xl bg-[var(--bg-tertiary)] text-xs border border-[var(--separator)]">
+                <div class="flex items-center gap-3">
+                  <span class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${it.done ? 'bg-[var(--accent-green)] text-black' : 'border border-[var(--label-tertiary)]'}">
+                    ${it.done ? '&#10003;' : ''}
+                  </span>
+                  <span class="${it.done ? 'line-through text-[var(--label-tertiary)]' : 'text-[var(--label-primary)] font-medium'}">${it.title}</span>
+                </div>
+                <div>
+                  ${it.done ?
+                    '<span class="text-[11px] font-semibold text-[var(--accent-green)]">Completed</span>' :
+                    `<button onclick="markTaskDone(${taskId})" class="px-3 py-1 rounded-full text-xs font-semibold bg-[var(--accent-blue)] text-black shadow-sm active:scale-95 transition-transform">Done</button>`
+                  }
+                </div>
               </div>
-              <div>
-                ${it.done ?
-                  '<span class="text-[11px] font-semibold text-[var(--accent-green)]">Completed</span>' :
-                  `<button onclick="markTaskDone(${taskId})" class="px-3 py-1 rounded-full text-xs font-semibold bg-[var(--accent-blue)] text-black shadow-sm active:scale-95 transition-transform">Done</button>`
-                }
-              </div>
-            </div>
-          `;
-        }
-      }).join('');
+            `;
+          }
+        }).join('');
+      }
 
       // Format date
-      const dateParts = d.day.split('-');
-      const dObj = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-      const dateFormatted = dObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+      let dateFormatted = d.day;
+      try {
+        const dateParts = d.day.split('-');
+        const dObj = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+        dateFormatted = dObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+      } catch (e) {}
 
       // Sleep delta badge
-      let sleepDeltaHtml = '—';
-      if (d.sleep.delta_min !== null) {
+      let sleepDeltaHtml = '<span class="text-xs text-[var(--label-tertiary)]">&mdash;</span>';
+      if (d.sleep && d.sleep.delta_min !== null) {
         const isNeutral = Math.abs(d.sleep.delta_min) <= 60;
         const arrowType = d.sleep.delta_min > 0 ? 'up' : (d.sleep.delta_min < 0 ? 'down' : 'none');
         sleepDeltaHtml = renderAppleArrowBadge(arrowType, `${Math.abs(d.sleep.delta_min)}min`, isNeutral);
       }
 
       // Mood 3D emoji
-      let moodEmoji = '&#128578;';
-      if (d.mood.label === 'Bad') moodEmoji = '&#128577;';
-      else if (d.mood.label === 'Meh') moodEmoji = '&#128528;';
-      else if (d.mood.label === 'Ok') moodEmoji = '&#128578;';
-      else if (d.mood.label === 'Good') moodEmoji = '&#128522;';
-      else if (d.mood.label === 'Great') moodEmoji = '&#128513;';
+      let moodEmoji = '&#128528;';
+      let moodLabel = d.mood?.label || '&mdash;';
+      if (d.mood?.label === 'Bad') moodEmoji = '&#128577;';
+      else if (d.mood?.label === 'Meh') moodEmoji = '&#128528;';
+      else if (d.mood?.label === 'Ok') moodEmoji = '&#128578;';
+      else if (d.mood?.label === 'Good') moodEmoji = '&#128522;';
+      else if (d.mood?.label === 'Great') moodEmoji = '&#128513;';
+      else if (!d.mood?.label) moodEmoji = '&#129488;';
 
-      const statusText = d.in_progress ? 'IN PROGRESS' : (d.score.total > 0 && d.score.done === d.score.total ? 'COMPLETED' : 'NO DATA');
+      const statusText = d.score.total === 0 ? 'NO DATA' : (d.in_progress ? 'IN PROGRESS' : (d.score.done === d.score.total ? 'COMPLETED' : ''));
+      const scoreStr = d.score.total === 0 ? '&mdash;' : `${d.score.done} / ${d.score.total}`;
 
       container.innerHTML = `
         <!-- Today Header -->
@@ -455,7 +467,7 @@
             <div class="text-xs text-[var(--label-secondary)] mt-0.5">${dateFormatted}</div>
           </div>
           <div class="text-right">
-            <div class="text-2xl font-bold text-[var(--label-primary)] num leading-tight">${d.score.done} / ${d.score.total}</div>
+            <div class="text-2xl font-bold text-[var(--label-primary)] num leading-tight">${scoreStr}</div>
             <div class="text-[10px] font-semibold tracking-wider uppercase text-[var(--label-secondary)] mt-0.5">${statusText}</div>
           </div>
         </div>
@@ -467,7 +479,6 @@
           </div>
 
           <div class="bg-[var(--bg-system)] p-3 rounded-2xl border border-[var(--separator)] space-y-2">
-            <!-- Months positioned over week columns -->
             <div class="flex gap-2 items-center">
               <div class="w-[12px] flex-shrink-0"></div>
               <div class="flex-1 flex gap-[3px] text-[9px] font-semibold text-[var(--label-secondary)]">
@@ -476,7 +487,6 @@
             </div>
 
             <div class="flex gap-2 items-center">
-              <!-- Day labels on the left -->
               <div class="w-[12px] flex-shrink-0 flex flex-col justify-between text-[8px] font-medium text-[var(--label-secondary)] h-[78px] pr-0.5">
                 <span>M</span>
                 <span>W</span>
@@ -506,8 +516,8 @@
               ${sleepDeltaHtml}
             </div>
             <div>
-              <div class="text-2xl font-bold tracking-tight text-[var(--label-primary)] num">${d.sleep.hours !== null ? d.sleep.hours + 'h' : '—'}</div>
-              <div class="text-[11px] text-[var(--label-secondary)] font-medium mt-0.5">${d.sleep.bed || '—'} &rarr; ${d.sleep.wake || '—'}</div>
+              <div class="text-2xl font-bold tracking-tight text-[var(--label-primary)] num">${d.sleep?.hours !== null && d.sleep?.hours !== undefined ? d.sleep.hours + 'h' : '&mdash;'}</div>
+              <div class="text-[11px] text-[var(--label-secondary)] font-medium mt-0.5">${d.sleep?.bed || '&mdash;'} &rarr; ${d.sleep?.wake || '&mdash;'}</div>
             </div>
           </div>
 
@@ -515,7 +525,7 @@
             <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Mood</span>
             <div class="flex items-center gap-3">
               <span class="text-3xl">${moodEmoji}</span>
-              <span class="text-xl font-bold text-[var(--label-primary)]">${d.mood.label || '—'}</span>
+              <span class="text-xl font-bold text-[var(--label-primary)]">${moodLabel}</span>
             </div>
             <div class="h-1"></div>
           </div>
@@ -588,13 +598,13 @@
       const targetS = d.target_hours || 7.5;
       const targetY_S = padTop + plotH - ((targetS - yMinS) / (yMaxS - yMinS)) * plotH;
 
-      const seriesCount = d.series.length;
+      const seriesCount = d.series ? d.series.length : 0;
       const barWidth = seriesCount === 7 ? 24 : (seriesCount === 30 ? 5 : 16);
-      const gap = (svgW - (seriesCount * barWidth)) / (seriesCount + 1);
+      const gap = seriesCount > 0 ? (svgW - (seriesCount * barWidth)) / (seriesCount + 1) : 0;
 
-      const barsHtml = d.series.map((item, idx) => {
+      const barsHtml = (d.series || []).map((item, idx) => {
         const x = gap + idx * (barWidth + gap);
-        if (item.hours === null) {
+        if (item.hours === null || item.hours === undefined) {
           return `<rect x="${x}" y="${padTop + plotH - 2}" width="${barWidth}" height="2" fill="rgba(255,255,255,0.06)" rx="1"/>`;
         }
         const clampedHours = Math.max(yMinS, Math.min(yMaxS, item.hours));
@@ -603,7 +613,7 @@
         const isSelected = activeBarSelection && activeBarSelection.chart === 'sleep' && activeBarSelection.index === idx;
         const fillColor = isSelected ? 'var(--chart-neutral-active)' : 'var(--chart-neutral)';
 
-        const dayNum = item.day.split('-')[2];
+        const dayNum = item.day ? item.day.split('-')[2] : '';
         const labelText = seriesCount <= 7 ? ['M','T','W','T','F','S','S'][idx % 7] : (idx % 7 === 0 ? dayNum : '');
 
         return `
@@ -616,7 +626,7 @@
 
       // Tooltip for selected bar
       let bubbleHtml = '';
-      if (activeBarSelection && activeBarSelection.chart === 'sleep') {
+      if (activeBarSelection && activeBarSelection.chart === 'sleep' && d.series && d.series[activeBarSelection.index]) {
         const it = d.series[activeBarSelection.index];
         const bx = gap + activeBarSelection.index * (barWidth + gap) + barWidth / 2;
         bubbleHtml = `
@@ -634,7 +644,7 @@
       const targetY_W = padTop + plotH - ((targetW - yMinW) / (yMaxW - yMinW)) * plotH;
 
       const wakePoints = [];
-      d.series.forEach((it, idx) => {
+      (d.series || []).forEach((it, idx) => {
         if (!it.wake) return;
         const parts = it.wake.split(':');
         const val = parseInt(parts[0]) + parseInt(parts[1]) / 60;
@@ -652,7 +662,7 @@
       const targetY_B = padTop + plotH - ((targetB - yMinB) / (yMaxB - yMinB)) * plotH;
 
       const bedPoints = [];
-      d.series.forEach((it, idx) => {
+      (d.series || []).forEach((it, idx) => {
         if (!it.bed) return;
         const parts = it.bed.split(':');
         const val = parseInt(parts[0]) + parseInt(parts[1]) / 60;
@@ -678,7 +688,7 @@
             <div class="text-xs text-[var(--label-secondary)] mt-0.5">Duration and schedule</div>
           </div>
           <div class="text-right">
-            <div class="text-2xl font-bold text-[var(--label-primary)] num leading-tight">${d.avg_hours ? d.avg_hours + 'h' : '—'}</div>
+            <div class="text-2xl font-bold text-[var(--label-primary)] num leading-tight">${d.avg_hours ? d.avg_hours + 'h' : '&mdash;'}</div>
             <div class="mt-0.5">${prevWeekBadge}</div>
           </div>
         </div>
@@ -694,7 +704,7 @@
         <div class="ios-widget-card space-y-3">
           <div class="flex items-center justify-between">
             <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Sleep Duration</span>
-            <span class="text-[11px] font-semibold text-[var(--accent-blue)]">Target: ${d.target_hours}h</span>
+            <span class="text-[11px] font-semibold text-[var(--accent-blue)]">Target: ${d.target_hours || 7.5}h</span>
           </div>
           <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-auto overflow-visible">
             <line x1="0" y1="${targetY_S}" x2="${svgW}" y2="${targetY_S}" stroke="var(--accent-blue)" stroke-width="1.2" stroke-dasharray="4 3"/>
@@ -708,7 +718,7 @@
         <div class="ios-widget-card space-y-3">
           <div class="flex items-center justify-between">
             <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Wake Time</span>
-            <span class="text-[11px] font-semibold text-[var(--accent-blue)]">Target: ${d.target_wake}</span>
+            <span class="text-[11px] font-semibold text-[var(--accent-blue)]">Target: ${d.target_wake || '14:30'}</span>
           </div>
           <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-auto overflow-visible">
             <line x1="0" y1="${targetY_W}" x2="${svgW}" y2="${targetY_W}" stroke="var(--accent-blue)" stroke-width="1.2" stroke-dasharray="4 3"/>
@@ -773,9 +783,9 @@
       }
 
       // Render 4 measurement cards
-      const cardsHtml = d.measurements.map(m => {
-        let deltaBadge = '<span class="text-xs text-[var(--label-tertiary)]">—</span>';
-        if (m.latest !== null) {
+      const cardsHtml = (d.measurements || []).map(m => {
+        let deltaBadge = '<span class="text-xs text-[var(--label-tertiary)]">&mdash;</span>';
+        if (m.latest !== null && m.latest !== undefined) {
           if (m.significant) {
             const dir = m.delta_cm >= 0 ? 'up' : 'down';
             deltaBadge = renderAppleArrowBadge(dir, `${Math.abs(m.delta_cm)}${m.unit}`, true);
@@ -784,7 +794,7 @@
           }
         }
 
-        const historyVals = m.history.map(h => h.value);
+        const historyVals = (m.history || []).map(h => h.value);
         const sparkSvg = generateSparkline(historyVals);
 
         let asymmetryHtml = '';
@@ -806,7 +816,7 @@
               <span class="text-[10px] text-[var(--label-tertiary)]">${m.cadence}</span>
             </div>
             <div class="flex items-baseline justify-between">
-              <span class="text-2xl font-bold tracking-tight text-[var(--label-primary)] num">${m.latest !== null ? m.latest + m.unit : 'no data'}</span>
+              <span class="text-2xl font-bold tracking-tight text-[var(--label-primary)] num">${m.latest !== null && m.latest !== undefined ? m.latest + m.unit : 'no data'}</span>
               ${deltaBadge}
             </div>
             <div class="w-full h-7">
@@ -817,19 +827,18 @@
         `;
       }).join('');
 
-      // Workouts week strip (last 7 days or current week)
-      const dayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+      // Workouts week strip (last 7 days)
+      const dayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
       const todayIso = new Date().toISOString().substring(0, 10);
+      const workoutsList = d.workouts || [];
 
-      // Get last 7 days of workouts
-      const recentWorkouts = d.workouts.slice(0, 7);
       const workoutDays = Array.from({ length: 7 }, (_, i) => {
         const dObj = new Date();
         dObj.setDate(dObj.getDate() - (6 - i));
         const iso = dObj.toISOString().substring(0, 10);
-        const wo = d.workouts.find(w => w.date === iso);
+        const wo = workoutsList.find(w => w.date === iso);
         return {
-          dayName: dayNames[i],
+          dayLetter: dayLetters[dObj.getDay()],
           date: iso,
           workout: wo,
           isToday: iso === todayIso
@@ -844,7 +853,7 @@
 
         return `
           <div onclick="selectWorkoutDay(${idx})" class="flex-1 flex flex-col items-center gap-1.5 cursor-pointer">
-            <span class="text-[10px] ${isSelected ? 'text-white font-bold' : 'text-[var(--label-secondary)] font-medium'}">${wDay.dayName}</span>
+            <span class="text-[10px] ${isSelected ? 'text-white font-bold' : 'text-[var(--label-secondary)] font-medium'}">${wDay.dayLetter}</span>
             <div class="w-6 h-6 rounded-full flex items-center justify-center ${isSelected ? 'ring-2 ring-white ring-offset-2 ring-offset-black' : ''}">
               <div class="w-2.5 h-2.5 rounded-full ${dotClass}"></div>
             </div>
@@ -853,7 +862,7 @@
       }).join('');
 
       const selDay = workoutDays[selectedWorkoutDayIndex] || workoutDays[6];
-      let detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-2">No workout logged for this day (Rest day).</div>';
+      let detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-2 text-center">No workout logged for this day (Rest day).</div>';
       if (selDay && selDay.workout) {
         const w = selDay.workout;
         detailHtml = `
@@ -862,9 +871,11 @@
               <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[rgba(255,255,255,0.08)] text-[var(--label-primary)] uppercase">${w.kind} &bull; ${w.load}</span>
               <span class="text-[var(--label-secondary)] num font-medium">${w.duration_min} min</span>
             </div>
-            <div class="text-[var(--label-primary)] font-normal leading-relaxed">${w.note || 'Regular training session.'}</div>
+            ${w.note ? `<div class="text-[var(--label-primary)] font-normal leading-relaxed">${w.note}</div>` : ''}
           </div>
         `;
+      } else if (workoutsList.length === 0) {
+        detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-2 text-center">No workouts logged yet.</div>';
       }
 
       container.innerHTML = `
@@ -963,7 +974,6 @@
 
       try {
         await apiRequest(`/api/tasks/${taskId}/done`, 'POST');
-        // Refresh today data
         const d = await apiRequest('/api/today');
         cachedToday = d;
         renderToday(d);

@@ -18,9 +18,9 @@ def seed():
     db_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Устанавливаем базовые факты (set_fact открывает свою сессию)
-    store.set_fact("city", "Нальчик")
+    store.set_fact("city", "Moscow")
     store.set_fact("wake_target", "14:30")
-    store.set_fact("user_name", "priest")
+    store.set_fact("user_name", "user")
 
     # Базовая дата — сегодня
     today_str = logic.get_logical_day()

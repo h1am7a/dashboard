@@ -181,7 +181,7 @@ POST /api/tasks/{id}/done
 
 ### 6. Авторизация и доступ
 
-Mini App открывается с `Telegram.WebApp.initData`. Бэкенд **обязан** проверять подпись HMAC-SHA256 (`secret = HMAC_SHA256("WebAppData", bot_token)`), сверять `auth_date` (не старше 24 ч) и пускать **только** `user.id == 483445453`. Всё остальное — 403.
+Mini App открывается с `Telegram.WebApp.initData`. Бэкенд **обязан** проверять подпись HMAC-SHA256 (`secret = HMAC_SHA256("WebAppData", bot_token)`), сверять `auth_date` (не старше 24 ч) и пускать **только** `user.id == ALLOWED_USER_ID`. Всё остальное — 403.
 
 Наружу — только HTTPS (Mini App иначе не открывается): домен + nginx + certbot, либо Cloudflare Tunnel для теста. Порт приложения слушает `127.0.0.1`, наружу не публикуется. Секреты — в `.env`, не в репозитории, не в коде.
 
