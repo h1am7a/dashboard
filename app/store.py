@@ -200,13 +200,18 @@ def session(path=None):
         con.close()
 
 
-def migrate(con: sqlite3.Connection) -> None:
-    con.executescript(DDL)
-    con.executescript("DROP VIEW IF EXISTS v_daily;")
-    con.executescript(DAILY_VIEW)
-    cur = con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+def migrate(con: sqlite3.Connection, force: bool = False) -> None:
+    cur = None
+    try:
+        cur = con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    except sqlite3.OperationalError:
+        pass
+
     old = int(cur["value"]) if cur else 0
-    if old < SCHEMA_VERSION:
+    if force or old < SCHEMA_VERSION:
+        con.executescript(DDL)
+        con.executescript("DROP VIEW IF EXISTS v_daily;")
+        con.executescript(DAILY_VIEW)
         con.execute(
             "INSERT INTO meta(key,value) VALUES('schema_version',?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",

@@ -551,24 +551,36 @@ if assets_dir.exists():
 @app.get("/{full_path:path}")
 def serve_spa(full_path: str):
     # Prevent intercepting /api
-    if full_path.startswith("api/"):
+    if full_path.startswith("api/") or full_path == "api":
         raise HTTPException(status_code=404, detail="Not Found")
 
-    # Serve static file if exists in DIST_DIR or WEB_DIR
-    if DIST_DIR.exists():
-        candidate = DIST_DIR / full_path
-        if candidate.is_file():
-            return FileResponse(str(candidate))
-        index_file = DIST_DIR / "index.html"
-        if index_file.exists():
-            return FileResponse(str(index_file))
+    # Block directory traversal and sensitive extensions
+    forbidden_exts = (".py", ".db", ".sqlite", ".env", ".sh", ".sql", ".md", ".toml", ".ini")
+    clean_path = full_path.lower()
+    if ".." in clean_path or clean_path.startswith("/") or clean_path.endswith(forbidden_exts) or "/." in clean_path or clean_path.startswith("."):
+        raise HTTPException(status_code=404, detail="Not Found")
 
-    candidate = WEB_DIR / full_path
-    if candidate.is_file():
+    # Serve static file if exists in DIST_DIR or WEB_DIR (strictly within root)
+    if DIST_DIR.exists():
+        dist_root = DIST_DIR.resolve()
+        candidate = (DIST_DIR / full_path).resolve()
+        if candidate.is_file() and candidate.is_relative_to(dist_root):
+            return FileResponse(str(candidate))
+        if not full_path:
+            index_file = dist_root / "index.html"
+            if index_file.exists():
+                return FileResponse(str(index_file))
+
+    web_root = WEB_DIR.resolve()
+    candidate = (WEB_DIR / full_path).resolve()
+    if candidate.is_file() and candidate.is_relative_to(web_root):
         return FileResponse(str(candidate))
 
-    index_fallback = WEB_DIR / "index.html"
-    if index_fallback.exists():
-        return FileResponse(str(index_fallback))
+    # SPA route fallback (only for root and valid views)
+    allowed_spa_views = ("", "index.html", "today", "sleep", "body")
+    if clean_path in allowed_spa_views:
+        index_fallback = web_root / "index.html"
+        if index_fallback.exists():
+            return FileResponse(str(index_fallback))
 
-    return {"message": "Priest Life API running. Frontend not found."}
+    raise HTTPException(status_code=404, detail="Not Found")
