@@ -8,9 +8,8 @@
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   
-  <!-- Genuine Apple SF Pro Fonts & Tailwind -->
-  <link rel="stylesheet" href="https://fonts.cdnfonts.com/css/sf-pro-display">
-  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <!-- Genuine Apple SF Pro Fonts & Local CSS -->
+  <link rel="stylesheet" href="/assets/style.css">
 
   <style>
     /* iOS 18 True Dark Mode (Pure OLED Black) */
@@ -353,16 +352,33 @@
         return '#FFFFFF';
       }
 
-      // Group 126 hitmap days into 18 weeks (7 days each)
+      // Align grid by weeks starting from Monday.
+      // If the first day of the period is not Monday — cut it off (trim it), rather than shifting columns.
+      const rawHitmap = d.hitmap || [];
+      let firstMon = 0;
+      while (firstMon < rawHitmap.length) {
+        const dt = new Date(rawHitmap[firstMon].day + 'T00:00:00');
+        if (dt.getDay() === 1) break; // 1 = Monday
+        firstMon++;
+      }
+      const alignedList = rawHitmap.slice(firstMon);
+
+      // Group aligned days into weeks of 7 days (Monday..Sunday)
       const weeks = [];
-      const hitmapList = d.hitmap || [];
-      for (let i = 0; i < hitmapList.length; i += 7) {
-        weeks.push(hitmapList.slice(i, i + 7));
+      for (let i = 0; i < alignedList.length; i += 7) {
+        weeks.push(alignedList.slice(i, i + 7));
       }
 
       const heatmapColsHtml = weeks.map(weekDays => {
-        const cellsHtml = weekDays.map(item => {
-          if (!item || item.percent === null) {
+        const paddedDays = [...weekDays];
+        while (paddedDays.length < 7) {
+          paddedDays.push(null);
+        }
+        const cellsHtml = paddedDays.map(item => {
+          if (!item) {
+            return `<div style="width: 100%; aspect-ratio: 1; border-radius: 2px; background: transparent;"></div>`;
+          }
+          if (item.percent === null) {
             return `<div title="No data" style="width: 100%; aspect-ratio: 1; border-radius: 2px; background: transparent; border: 0.5px dashed var(--separator);"></div>`;
           }
           const bg = getHeatmapColor(item.percent);
@@ -373,19 +389,23 @@
         return `<div style="flex: 1; display: flex; flex-direction: column; gap: 3px;">${cellsHtml}</div>`;
       }).join('');
 
-      // Dynamic month row across weeks
+      // Month label above the first week of that month
       const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       let lastMonth = -1;
       const monthLabels = weeks.map((week, idx) => {
-        if (!week[0]) return '<span></span>';
-        const dObj = new Date(week[0].day);
-        const m = dObj.getMonth();
-        if (m !== lastMonth) {
-          lastMonth = m;
-          const isLatest = idx >= weeks.length - 3;
-          return `<span class="truncate ${isLatest ? 'text-[var(--label-primary)] font-bold' : ''}">${monthNames[m]}</span>`;
+        let label = '';
+        for (const item of week) {
+          if (!item) continue;
+          const dObj = new Date(item.day + 'T00:00:00');
+          const m = dObj.getMonth();
+          if (m !== lastMonth) {
+            lastMonth = m;
+            const isLatest = idx >= weeks.length - 3;
+            label = `<span class="truncate ${isLatest ? 'text-[var(--label-primary)] font-bold' : ''}">${monthNames[m]}</span>`;
+            break;
+          }
         }
-        return '<span></span>';
+        return label || '<span></span>';
       });
 
       const monthRowHtml = monthLabels.map(slot => `<div style="flex: 1; text-align: left; overflow: visible; white-space: nowrap;">${slot}</div>`).join('');

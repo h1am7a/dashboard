@@ -1,26 +1,33 @@
-"""Data access layer for life database profile.
+"""Слой доступа к данным профиля priest.
 
-Single source of truth for the database: both CLI (bin/life.py) and
-the Telegram Mini App interface access the database exclusively through these functions.
-No raw SQL INSERTs anywhere else.
+Единая точка правды для БД: и CLI (bin/life.py), и будущее Telegram-приложение
+ходят в базу только через эти функции. Никаких ручных INSERT'ов.
 
-Database path: $PRIEST_DB or <workspace>/db/life.db
+Путь к БД: $PRIEST_DB или <workspace>/db/life.db
 """
 from __future__ import annotations
 
 import os
+import json
 import sqlite3
+from datetime import date as date_cls
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parent.parent
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 METRIC_KINDS = {
-    # kind: (unit, valid range or None)
+    # kind: (unit, допустимый диапазон или None)
     "weight": ("kg", (30, 250)),
     "waist": ("cm", (40, 200)),
+    "biceps_r": ("cm", (15, 70)),
+    "forearm_r": ("cm", (15, 55)),
+    "thigh_r": ("cm", (25, 95)),
+    "thigh_l": ("cm", (25, 95)),
+    "walk_min": ("min", (0, 600)),
+    "routine_am": ("0-1", (0, 1)),
     "sleep_hours": ("h", (0, 24)),
     "wake_time": ("hh", (0, 24)),
     "bed_time": ("hh", (0, 24)),
@@ -35,9 +42,9 @@ METRIC_KINDS = {
     "calories": ("kcal", (0, 10000)),
     "protein": ("g", (0, 500)),
     "water": ("l", (0, 15)),
-    "screen_time": ("h", (0, 168)),
-    "porn_count": ("count", (0, 30)),
-    # daily minimum checks: 0 = not done, 1 = completed
+    "screen_time": ("h", (0, 24)),
+    "porn_count": ("раз", (0, 30)),
+    # отметки минимума дня: 0 = нет, 1 = сделано
     "wake_light": ("0-1", (0, 1)),
     "protein_ok": ("0-1", (0, 1)),
     "routine_ok": ("0-1", (0, 1)),
@@ -48,7 +55,7 @@ CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
 
 CREATE TABLE IF NOT EXISTS metrics(
   id INTEGER PRIMARY KEY,
-  ts TEXT NOT NULL,                 -- ISO date (YYYY-MM-DD) or datetime
+  ts TEXT NOT NULL,                 -- ISO date (YYYY-MM-DD) или datetime
   kind TEXT NOT NULL,
   value REAL NOT NULL,
   unit TEXT,
@@ -76,7 +83,7 @@ CREATE TABLE IF NOT EXISTS tasks(
   project TEXT,
   due TEXT,
   status TEXT NOT NULL DEFAULT 'open',   -- open / done / dropped
-  priority INTEGER NOT NULL DEFAULT 3,   -- 1 highest .. 5 lowest
+  priority INTEGER NOT NULL DEFAULT 3,   -- 1 высокий .. 5 низкий
   note TEXT,
   done_at TEXT
 );
@@ -122,6 +129,16 @@ CREATE TABLE IF NOT EXISTS tx(
 );
 CREATE INDEX IF NOT EXISTS ix_tx_ts ON tx(ts);
 
+CREATE TABLE IF NOT EXISTS habits(
+  key TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  rule TEXT NOT NULL,               -- JSON: см. HABIT_RULE
+  active_from TEXT NOT NULL,
+  active_to TEXT,                   -- NULL = действует
+  sort INTEGER NOT NULL DEFAULT 100,
+  note TEXT
+);
+
 CREATE TABLE IF NOT EXISTS items(
   id INTEGER PRIMARY KEY,
   name TEXT UNIQUE NOT NULL,
@@ -129,8 +146,8 @@ CREATE TABLE IF NOT EXISTS items(
   brand TEXT,
   volume TEXT,
   cadence TEXT,                     -- daily / 2x_week / weekly / as_needed
-  role TEXT,                        -- routine purpose, usage instructions
-  note TEXT,                        -- formulation / usage nuances
+  role TEXT,                        -- зачем в рутине, как применять
+  note TEXT,                        -- нюансы состава/использования
   status TEXT NOT NULL DEFAULT 'active',   -- active / out / dropped
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -140,7 +157,7 @@ CREATE TABLE IF NOT EXISTS item_log(
   id INTEGER PRIMARY KEY,
   date TEXT NOT NULL,
   item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
-  item_name TEXT,                   -- denormalization: log persists even if item is deleted
+  item_name TEXT,                   -- денормализация: лог живёт даже если айтем удалён
   action TEXT NOT NULL DEFAULT 'used',   -- used / skipped / restocked
   note TEXT,
   inserted_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -149,7 +166,8 @@ CREATE INDEX IF NOT EXISTS ix_item_log_date ON item_log(date, item_id);
 
 """
 
-# Views are recreated upon each migrate() call
+# Представления пересоздаются на каждом migrate() — это дешево и избавляет
+# от ручных миграций при изменении состава колонок.
 DAILY_VIEW = """
 CREATE VIEW v_daily AS
 SELECT d.day,
@@ -158,6 +176,10 @@ SELECT d.day,
   (SELECT value FROM metrics m WHERE m.kind='bed_time'    AND m.ts=d.day ORDER BY m.id DESC LIMIT 1) AS bed_time,
   (SELECT value FROM metrics m WHERE m.kind='weight'      AND m.ts=d.day ORDER BY m.id DESC LIMIT 1) AS weight,
   (SELECT value FROM metrics m WHERE m.kind='waist'       AND m.ts=d.day ORDER BY m.id DESC LIMIT 1) AS waist,
+  (SELECT value FROM metrics m WHERE m.kind='biceps_r'    AND m.ts=d.day ORDER BY m.id DESC LIMIT 1) AS biceps_r,
+  (SELECT value FROM metrics m WHERE m.kind='forearm_r'   AND m.ts=d.day ORDER BY m.id DESC LIMIT 1) AS forearm_r,
+  (SELECT value FROM metrics m WHERE m.kind='thigh_r'     AND m.ts=d.day ORDER BY m.id DESC LIMIT 1) AS thigh_r,
+  (SELECT value FROM metrics m WHERE m.kind='thigh_l'     AND m.ts=d.day ORDER BY m.id DESC LIMIT 1) AS thigh_l,
   (SELECT value FROM metrics m WHERE m.kind='mood'        AND m.ts=d.day ORDER BY m.id DESC LIMIT 1) AS mood,
   (SELECT value FROM metrics m WHERE m.kind='energy'      AND m.ts=d.day ORDER BY m.id DESC LIMIT 1) AS energy,
   (SELECT value FROM metrics m WHERE m.kind='porn_count'  AND m.ts=d.day ORDER BY m.id DESC LIMIT 1) AS porn_count,
@@ -173,7 +195,7 @@ FROM (SELECT DISTINCT ts AS day FROM metrics UNION SELECT DISTINCT date FROM wor
 
 
 def db_path() -> Path:
-    return Path(os.environ.get("PRIEST_DB") or (WORKSPACE / "db" / "life.db"))
+    return Path(os.environ.get("DB_PATH") or os.environ.get("PRIEST_DB") or (WORKSPACE / "db" / "life.db"))
 
 
 def connect(path: Path | str | None = None) -> sqlite3.Connection:
@@ -200,17 +222,17 @@ def session(path=None):
         con.close()
 
 
-def migrate(con: sqlite3.Connection, force: bool = False) -> None:
+def migrate(con: sqlite3.Connection) -> None:
     cur = None
     try:
         cur = con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
     except sqlite3.OperationalError:
         pass
-
     old = int(cur["value"]) if cur else 0
-    if force or old < SCHEMA_VERSION:
+    if old < SCHEMA_VERSION:
         con.executescript(DDL)
         con.executescript("DROP VIEW IF EXISTS v_daily;")
+        seed_habits(con)
         con.executescript(DAILY_VIEW)
         con.execute(
             "INSERT INTO meta(key,value) VALUES('schema_version',?) "
@@ -219,21 +241,21 @@ def migrate(con: sqlite3.Connection, force: bool = False) -> None:
         )
 
 
-# ---------- validation utilities ----------
+# ---------- утилиты валидации ----------
 def _today() -> str:
     return date.today().isoformat()
 
 
 def _norm_date(value: str | None) -> str:
-    if not value or value in ("today",):
+    if not value or value in ("today", "сегодня"):
         return _today()
     s = value.strip()
-    if s in ("yesterday",):
+    if s in ("yesterday", "вчера"):
         return (date.today() - timedelta(days=1)).isoformat()
     try:
         datetime.fromisoformat(s)
     except ValueError:
-        raise ValueError(f"cannot parse date '{value}', ISO format required: YYYY-MM-DD or YYYY-MM-DDTHH:MM")
+        raise ValueError(f"дата '{value}' не парсится, нужен ISO: YYYY-MM-DD или YYYY-MM-DDTHH:MM")
     return s
 
 
@@ -242,15 +264,15 @@ def _check_metric(kind: str, value: float, unit: str | None) -> tuple[float, str
     try:
         value = float(str(value).replace(",", "."))
     except ValueError:
-        raise ValueError(f"value '{value}' is not a number")
+        raise ValueError(f"значение '{value}' не число")
     unit = unit or (METRIC_KINDS.get(kind) or (None, None))[0]
     rng = (METRIC_KINDS.get(kind) or (None, None))[1]
     if rng and not (rng[0] <= value <= rng[1]):
-        raise ValueError(f"{kind}={value} is outside valid range {rng[0]}..{rng[1]} — check units")
+        raise ValueError(f"{kind}={value} вне правдоподобного диапазона {rng[0]}..{rng[1]} — проверь единицы")
     return value, unit
 
 
-# ---------- write methods ----------
+# ---------- запись ----------
 def add_metric(kind, value, ts=None, unit=None, note=None, source="chat", con=None) -> int:
     value, unit = _check_metric(kind, value, unit)
     ts = _norm_date(ts)
@@ -267,7 +289,7 @@ def add_workout(date_=None, kind=None, duration_min=None, load=None, note=None) 
     if duration_min is not None:
         duration_min = int(duration_min)
         if not 0 < duration_min <= 600:
-            raise ValueError("duration_min must be 1..600 minutes")
+            raise ValueError("duration_min должен быть 1..600 минут")
     if load and load not in ("easy", "moderate", "hard"):
         raise ValueError("load: easy / moderate / hard")
     with session() as c:
@@ -279,7 +301,7 @@ def add_workout(date_=None, kind=None, duration_min=None, load=None, note=None) 
 
 def add_task(title, project=None, due=None, priority=3, note=None) -> int:
     if not title or not title.strip():
-        raise ValueError("task: empty title")
+        raise ValueError("task: пустой title")
     priority = int(priority)
     if not 1 <= priority <= 5:
         raise ValueError("priority 1..5")
@@ -299,12 +321,12 @@ def close_task(task_id: int, status="done") -> None:
             (status, int(task_id)),
         )
         if cur.rowcount == 0:
-            raise ValueError(f"open task with id={task_id} not found")
+            raise ValueError(f"открытая задача id={task_id} не найдена")
 
 
 def add_event(date_, title, type_=None, remind=None, note=None) -> int:
     if not title:
-        raise ValueError("event: empty title")
+        raise ValueError("event: пустой title")
     with session() as c:
         return c.execute(
             "INSERT INTO events(date,title,type,remind,note) VALUES(?,?,?,?,?)",
@@ -323,7 +345,7 @@ def add_journal(date_=None, mood=None, energy=None, text=None) -> int:
 def add_tx(amount, direction="out", ts=None, currency="RUB", category=None, account=None, note=None) -> int:
     amount = float(str(amount).replace(",", "."))
     if amount <= 0:
-        raise ValueError("amount must be > 0, direction is specified via direction param")
+        raise ValueError("amount должен быть > 0, направление задаётся direction")
     if direction not in ("in", "out"):
         raise ValueError("direction: in / out")
     with session() as c:
@@ -333,7 +355,7 @@ def add_tx(amount, direction="out", ts=None, currency="RUB", category=None, acco
         ).lastrowid
 
 
-# ---------- inventory and routines ----------
+# ---------- инвентарь и рутины ----------
 ITEM_CADENCES = ("daily", "daily_2x", "2x_week", "weekly", "as_needed")
 ITEM_ACTIONS = ("used", "skipped", "restocked")
 
@@ -341,7 +363,7 @@ ITEM_ACTIONS = ("used", "skipped", "restocked")
 def add_item(name, category=None, brand=None, volume=None, cadence=None,
              role=None, note=None, status="active") -> int:
     if not name or not name.strip():
-        raise ValueError("item: empty name")
+        raise ValueError("item: пустое name")
     if cadence and cadence not in ITEM_CADENCES:
         raise ValueError(f"cadence: {' / '.join(ITEM_CADENCES)}")
     if status not in ("active", "out", "dropped"):
@@ -370,9 +392,9 @@ def _find_item(con, needle: str) -> sqlite3.Row:
     if len(found) == 1:
         return found[0]
     if not found:
-        raise ValueError(f"item '{needle}' not found — check items list")
+        raise ValueError(f"не нашёл средство '{needle}' — проверь команду items")
     names = ", ".join(r["name"] for r in found)
-    raise ValueError(f"multiple items match '{needle}': {names} — please clarify")
+    raise ValueError(f"под '{needle}' подходит несколько: {names} — уточни")
 
 
 def log_item(name, action="used", date_=None, note=None) -> int:
@@ -421,7 +443,7 @@ def set_fact(key, value) -> None:
         )
 
 
-# ---------- read methods ----------
+# ---------- чтение ----------
 def rows(con: sqlite3.Connection, sql: str, params=()) -> list[dict]:
     return [dict(r) for r in con.execute(sql, params)]
 
@@ -438,3 +460,193 @@ def report(days: int = 7, con: sqlite3.Connection | None = None) -> dict:
         daily = rows(c, "SELECT * FROM v_daily WHERE day>=? ORDER BY day", (since,))
     return {"period_days": days, "since": since, "metrics": m, "workouts": w[0],
             "tasks": t, "money": money, "daily": daily}
+
+
+# --------------------------------------------------------------------------
+# Якоря дня (habits). Один источник правды для хитмапа и «Today».
+# Правило — JSON-строка, интерпретируется в _rule_done. Пользователь ничего
+# не отмечает руками: всё выводится из метрик, тренировок и задач.
+# --------------------------------------------------------------------------
+DEFAULT_HABITS = [
+    ("sleep_ge_7",   "Сон ≥ 7 ч",           {"t": "metric_ge", "kind": "sleep_hours", "value": 7}, 10),
+    ("wake_window",  "Подъём в окне цели",  {"t": "wake_window", "tol_min": 60}, 20),
+    ("workout_day",  "Тренировка",          {"t": "workouts_ge", "value": 1}, 30),
+    ("protein_ok",   "Белок в первом приёме", {"t": "metric_ge", "kind": "protein_ok", "value": 1}, 40),
+    ("routine_eve",  "Вечерняя рутина",     {"t": "metric_ge", "kind": "routine_ok", "value": 1}, 50),
+    ("routine_am",   "Утренняя рутина",     {"t": "metric_ge", "kind": "routine_am", "value": 1}, 55),
+    ("walk_30",      "Ходьба ≥ 30 мин",     {"t": "metric_ge", "kind": "walk_min", "value": 30}, 60),
+]
+
+# Якоря, выключенные на старте (пользователь ещё не начал).
+HABITS_OFF_AT_START = {"walk_30", "routine_am"}
+
+
+def seed_habits(con: sqlite3.Connection | None = None) -> None:
+    """Заводит якоря, если их ещё нет. Существующие не трогает."""
+    if con is None:
+        with session() as c:
+            return seed_habits(c)
+    c = con
+    for key, title, rule, sort in DEFAULT_HABITS:
+        if c.execute("SELECT 1 FROM habits WHERE key=?", (key,)).fetchone():
+            continue
+        active_to = "2000-01-01" if key in HABITS_OFF_AT_START else None
+        c.execute(
+            "INSERT INTO habits(key,title,rule,active_from,active_to,sort) VALUES(?,?,?,?,?,?)",
+            (key, title, json.dumps(rule, ensure_ascii=False), "2026-01-01", active_to, sort),
+        )
+
+
+def habits_list(day: str | None = None, include_inactive: bool = False) -> list[dict]:
+    day = _norm_date(day) if day else _today()
+    out = []
+    with session() as c:
+        for r in c.execute("SELECT * FROM habits ORDER BY sort, key"):
+            rule = json.loads(r["rule"])
+            out.append({
+                "key": r["key"], "title": r["title"],
+                "active_from": r["active_from"], "active_to": r["active_to"],
+                "rule": rule, "sort": r["sort"],
+                "active": _habit_active(r, day),
+                "done": _rule_done(c, rule, day),
+            })
+    return out if include_inactive else [h for h in out if h["active"]]
+
+
+def add_habit(key: str, title: str, rule: dict, active_from: str | None = None,
+              sort: int = 100, note: str | None = None) -> None:
+    if not key or not title:
+        raise ValueError("habit: нужны key и title")
+    if rule.get("t") not in ("metric_ge", "workouts_ge", "wake_window"):
+        raise ValueError("habit: rule.t ∈ metric_ge / workouts_ge / wake_window")
+    with session() as c:
+        c.execute(
+            "INSERT INTO habits(key,title,rule,active_from,active_to,sort,note) VALUES(?,?,?,?,NULL,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET title=excluded.title, rule=excluded.rule, "
+            "active_to=NULL, sort=excluded.sort, note=excluded.note",
+            (key, title, json.dumps(rule, ensure_ascii=False), active_from or _today(), int(sort), note),
+        )
+
+
+def deactivate_habit(key: str, day: str | None = None) -> None:
+    """Закрывает якорь с указанной даты: история до неё сохраняется, дальше не считается."""
+    day = _norm_date(day) if day else _today()
+    # действует по вчера включительно: сегодняшний день ещё можно закрыть
+    cutoff = (date_cls.fromisoformat(day) - timedelta(days=1)).isoformat()
+    with session() as c:
+        cur = c.execute("UPDATE habits SET active_to=? WHERE key=? AND (active_to IS NULL OR active_to>?)",
+                        (cutoff, key, cutoff))
+        if cur.rowcount == 0:
+            raise ValueError(f"активный якорь {key} не найден")
+
+
+def _habit_active(row, day: str) -> bool:
+    if row["active_from"] and day < row["active_from"]:
+        return False
+    if row["active_to"] and day > row["active_to"]:
+        return False
+    return True
+
+
+def _rule_done(c, rule: dict, day: str) -> bool:
+    t = rule.get("t")
+    if t == "metric_ge":
+        v = c.execute("SELECT MAX(value) v FROM metrics WHERE kind=? AND ts=?",
+                      (rule["kind"], day)).fetchone()["v"]
+        return v is not None and v >= float(rule.get("value", 1))
+    if t == "workouts_ge":
+        n = c.execute("SELECT COUNT(*) n FROM workouts WHERE date=?", (day,)).fetchone()["n"]
+        return n >= int(rule.get("value", 1))
+    if t == "wake_window":
+        v = c.execute("SELECT MAX(value) v FROM metrics WHERE kind='wake_time' AND ts=?", (day,)).fetchone()["v"]
+        if v is None:
+            return False
+        target = c.execute("SELECT value FROM facts WHERE key='wake_target'").fetchone()
+        try:
+            th, tm = (target["value"] if target else "14:30").replace(".", ":").split(":")[:2]
+            tgt = int(float(th)) + int(float(tm)) / 60
+        except Exception:
+            tgt = 14.5
+        return abs(float(v) - tgt) * 60 <= float(rule.get("tol_min", 60))
+    return False
+
+
+def day_score(day: str | None = None) -> dict:
+    """Счёт дня: якоря + задачи со сроком на этот день. total=0 → нет данных."""
+    day = _norm_date(day) if day else _today()
+    items = [{"key": h["key"], "title": h["title"], "done": h["done"], "type": "habit"}
+             for h in habits_list(day)]
+    with session() as c:
+        for r in c.execute("SELECT id,title,status FROM tasks WHERE due=? ORDER BY priority,id", (day,)):
+            items.append({"key": f"task:{r['id']}", "title": r["title"],
+                          "done": r["status"] == "done", "type": "task"})
+        # день без единой записи — это не «всё провалено», а «нет данных»
+        has_data = bool(c.execute(
+            "SELECT (SELECT COUNT(*) FROM metrics WHERE ts=?) + (SELECT COUNT(*) FROM workouts WHERE date=?) n",
+            (day, day)).fetchone()["n"])
+    if not has_data:
+        return {"day": day, "done": 0, "total": 0, "percent": None, "items": []}
+    total = len(items)
+    done = sum(1 for i in items if i["done"])
+    return {"day": day, "done": done, "total": total,
+            "percent": round(100 * done / total) if total else None,
+            "items": items}
+
+
+def hitmap(days: int = 84) -> list[dict]:
+    """Хитмап: процент выполнения по дням, от старых к новым. total=0 → нет данных."""
+    end = date_cls.fromisoformat(_today())
+    out = []
+    for i in range(days - 1, -1, -1):
+        d = (end - timedelta(days=i)).isoformat()
+        s = day_score(d)
+        out.append({"day": d, "done": s["done"], "total": s["total"], "percent": s["percent"]})
+    return out
+
+
+BODY_KINDS = ["waist", "biceps_r", "forearm_r", "thigh_r", "thigh_l"]
+
+
+def measurements(days: int = 365, kinds: list[str] | None = None) -> list[dict]:
+    """Замеры тела для экрана Body: последнее значение, дельта и история.
+
+    delta_cm — разница с предыдущим замером; < 1 см помечается шумом (significant=False),
+    потому что точность портняжной ленты ±1–1,5 см.
+    """
+    kinds = kinds or BODY_KINDS
+    since = (date_cls.fromisoformat(_today()) - timedelta(days=days)).isoformat()
+    out = []
+    with session() as c:
+        for k in kinds:
+            rows = c.execute(
+                "SELECT ts, value FROM metrics WHERE kind=? AND ts>=? ORDER BY ts, id", (k, since)
+            ).fetchall()
+            if not rows:
+                out.append({"kind": k, "unit": METRIC_KINDS.get(k, ("cm",))[0],
+                            "latest": None, "date": None, "delta_cm": None,
+                            "significant": False, "history": []})
+                continue
+            latest = rows[-1]
+            prev = rows[-2] if len(rows) > 1 else None
+            delta = round(latest["value"] - prev["value"], 1) if prev else None
+            out.append({
+                "kind": k, "unit": METRIC_KINDS.get(k, ("cm",))[0],
+                "latest": latest["value"], "date": latest["ts"],
+                "delta_cm": delta,
+                "significant": delta is not None and abs(delta) >= 1.0,
+                "since": prev["ts"] if prev else None,
+                "history": [{"date": r["ts"], "value": r["value"]} for r in rows],
+            })
+    return out
+
+
+def thigh_asymmetry(day: str | None = None) -> dict | None:
+    """Разница правого и левого бедра на последнюю дату, где есть оба замера."""
+    with session() as c:
+        r = c.execute(
+            "SELECT r.ts, r.value r, l.value l FROM metrics r JOIN metrics l "
+            "ON l.ts=r.ts AND l.kind='thigh_l' WHERE r.kind='thigh_r' "
+            "ORDER BY r.ts DESC, r.id DESC LIMIT 1").fetchone()
+    if not r:
+        return None
+    return {"date": r["ts"], "right": r["r"], "left": r["l"], "diff": round(r["r"] - r["l"], 1)}

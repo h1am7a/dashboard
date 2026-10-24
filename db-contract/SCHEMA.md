@@ -1,236 +1,626 @@
-# Architecture: Data, Scripts, Telegram Mini App
+# Архитектура: данные, скрипты, будущее Telegram-приложение
 
-Updated: 2026-10-23 (added specification for Mini App)
+Обновлено: 2026-10-23 (добавлено ТЗ для Mini App)
 
-## Principles (Future-proof design)
+## Принципы (чтобы через полгода ничего не переделывать)
 
-1. **One Database, One Access Layer.** `db/life.db` (SQLite, WAL mode) + `app/store.py`.
-   Bot, dashboard, cron jobs, user in chat — everything writes exclusively through `store.py`.
-   No direct or raw SQL INSERTs anywhere else.
-2. **Validation in One Place.** Metric value ranges, units, and ISO dates are enforced in `store.py`.
-   Invalid data is rejected before writing, never "fixed later".
-3. **Versioned Schema.** `meta.schema_version` and migrations in `store.migrate()`.
-   Adding tables/columns requires a version increment and `IF NOT EXISTS` / `ALTER TABLE`.
-4. **Time Representation.** Stored in database as ISO-8601. Daily metrics use `YYYY-MM-DD`, timestamped events include exact time.
-   Display in MSK is handled by the presentation layer, not the database.
-5. **Dashboard-Ready.** Every view has a ready data source: `v_daily` (trends),
-   `report()` (summaries), `tasks`/`events` (lists), `tx` (financials). The dashboard does not compute
-   business logic on its own — it consumes pre-aggregated metrics.
+1. **Одна БД, один слой доступа.** `db/life.db` (SQLite, WAL) + `app/store.py`.
+   Бот, дашборд, cron-джобы, я в чате — все пишут только через `store.py`.
+   Никто не лезет в базу сырыми INSERT'ами.
+2. **Валидация в одном месте.** Диапазоны метрик, единицы, ISO-даты — в `store.py`.
+   Плохие данные отсекаются до записи, а не «починим потом».
+3. **Схема версионируется.** `meta.schema_version`, миграции — в `store.migrate()`.
+   Добавление таблиц/колонок = новая версия + `IF NOT EXISTS` / ALTER.
+4. **Время.** В базе — ISO-8601. Дневные метрики — `YYYY-MM-DD`, точные события — с временем.
+   Отображение в МСК делает слой представления, не БД.
+5. **Готовность к дашборду.** Для каждого экрана уже есть источник: `v_daily` (тренды),
+   `report()` (сводки), `tasks`/`events` (списки), `tx` (деньги). Дашборд не считает
+   бизнес-логику сам — берёт готовые агрегаты.
 
-## Files
+## Файлы
 
-```text
-app/store.py      # Data layer: connect/session/migrate + add_*/report
-bin/life.py       # CLI: manual entry and management
-db/life.db        # SQLite database
-db-contract/      # Canonical contracts and schemas
+```
+app/store.py      # данные: connect/session/migrate + add_*/report
+bin/life.py       # CLI: вся запись руками/мной
+db/life.db        # база
+docs/SCHEMA.md    # этот файл
 ```
 
-## Tables
+## Таблицы
 
-| Table | Key Columns | Purpose |
+| Таблица | Ключевое | Зачем |
 |---|---|---|
-| `metrics` | `ts`, `kind`, `value`, `unit` | Numeric measurements: sleep, weight, mood, steps, heart rate, calories |
-| `workouts` | `date`, `kind`, `duration_min`, `load` | Workout logs |
-| `tasks` | `title`, `project`, `due`, `priority`, `status` | To-do items |
-| `events` | `date`, `title`, `type`, `remind` | Calendar, deadlines, reminders |
-| `journal` | `date`, `mood`, `energy`, `text` | Daily reflection log |
-| `tx` | `ts`, `amount`, `currency`, `direction`, `category` | Financial transactions |
-| `facts` | `key` → `value` | Persistent facts (city, height, goals) |
-| `items` | `name`, `category`, `brand`, `volume`, `cadence`, `role`, `note`, `status` | Routine inventory: hygiene, training gear, supplements |
-| `item_log` | `date`, `item_id`, `item_name`, `action`, `note` | Routine check-ins: `used` / `skipped` / `restocked` |
-| `meta` | `key` → `value` | Schema version and internal metadata |
+| `metrics` | ts, kind, value, unit | любые числа: сон, вес, настроение, шаги, пульс, КБЖУ |
+| `workouts` | date, kind, duration_min, load | тренировки |
+| `tasks` | title, project, due, priority, status | дела |
+| `events` | date, title, type, remind | календарь, дедлайны, напоминания |
+| `journal` | date, mood, energy, text | дневник состояния |
+| `tx` | ts, amount, currency, direction, category | деньги |
+| `facts` | key → value | устойчивые факты (город, рост, цели) |
+| `items` | name, category, brand, volume, cadence, role, note, status | инвентарь: гигиена, инвентарь для тренировок, бытовое |
+| `item_log` | date, item_id, item_name, action, note | отметки: used / skipped / restocked |
+| `meta` | key → value | версия схемы и служебное |
 
-Validated metric kinds: `weight`, `sleep_hours`, `sleep_quality`, `steps`, `hr_rest`, `hr_max`,
-`mood`, `energy`, `stress`, `focus`, `calories`, `protein`, `water`, `screen_time`, `wake_time`, `bed_time`, `porn_count`.
-Adding a new metric kind requires updating `METRIC_KINDS` in `app/store.py` (unit + valid range).
+Виды метрик с валидацией: `weight, sleep_hours, sleep_quality, steps, hr_rest, hr_max,
+mood, energy, stress, focus, calories, protein, water, screen_time, wake_time, bed_time, porn_count`.
+Новый вид метрики — добавить в `METRIC_KINDS` (unit + правдоподобный диапазон).
 
-## Logical Day
+## Логический день
 
-The day boundary is **09:00**: everything occurring from 09:00 to 08:59 of the next calendar day is attributed to the starting date. This accommodates a shifted sleep phase (wake ~15:00, bedtime ~08:00); otherwise, a single night's sleep would be split across two calendar days, distorting analytics. The `--date` argument in commands refers to the logical day, not the calendar day.
+Граница дня — **09:00**: всё, что происходит с 09:00 до 08:59 следующего календарного дня, пишется на дату начала. Причина — сдвинутая фаза сна (подъём ~15:00, отбой ~08:00); иначе ночь разрывается на два «дня» и статистика врёт. `--date` в командах = логический день, не календарный.
 
-## CLI (Canonical Write Path)
+## CLI (единственный путь записи)
 
 ```bash
-life.py sleep_hours 6.5 --date 2026-10-22 --note "went to bed at 2"
+life.py sleep_hours 6.5 --date 2026-10-22 --note "лёг в 2"
 life.py weight 78.4
 life.py workout --kind gym --min 60 --load hard
-life.py task "Finish feature X" --project income --due 2026-10-30 --prio 1
+life.py task "сделать X" --project income --due 2026-10-30 --prio 1
 life.py tasks / done 3 / drop 4
-life.py event 2026-11-25 "VPN renewal" --remind 1d
+life.py event 2026-11-25 "аренда VPN" --remind 1d
 life.py tx 1500 --dir out --cat food
 life.py journal --mood 6 --energy 5 --text "..."
-life.py fact city "..."
-life.py items [--cat hygiene]                              # inventory
-life.py item "Name" --cat hygiene --cadence daily --role "..." --note "..."
-life.py used "<item>" [--date 2026-10-22]                  # check-in as used
-life.py skip "<item>"                                      # mark as skipped
-life.py usage --days 30                                    # unused items
+life.py fact city "..." 
+life.py items [--cat hygiene]                              # инвентарь
+life.py item "Название" --cat hygiene --cadence daily --role "..." --note "..."
+life.py used "<средство>" [--date 2026-10-22]               # отметка «сделал»
+life.py skip "<средство>"                                  # отметка «пропустил»
+life.py usage --days 30                                    # кто давно не использовался
 life.py report --days 14
-life.py get                                                # complete current snapshot
-life.py sql "select ..."                                   # read-only query
+life.py get                       # всё актуальное одним куском
+life.py sql "select ..."          # только чтение
 ```
-Outputs JSON so scripts and bots can parse results reliably.
+Возврат — JSON, чтобы потом дёргать из бота/скриптов и не парсить текст.
 
-## Telegram Mini App Specification
+## Telegram Mini App — ТЗ
 
-### 0. Scope & Target User
+Этот раздел — то, что отдаётся разработчику (Antigravity / любая ИИ-среда). Читать целиком, не выдёргивать куски.
 
-Personal analytics dashboard **for a single user**. Not a SaaS, no multi-tenancy, no public registration. Goal: **understand current status within 10 seconds** — sleep, screen time, schedule, workouts, tasks — and log updates in two taps.
+### 0. Что это и для кого
 
-Platform: **Telegram Mini App** (runs inside Telegram WebView). Presentation timezone is **MSK (UTC+3)**; all dates use ISO format.
+Личный дашборд **для одного пользователя**. Не продукт, не SaaS, без мультиюзера, без регистрации, без «красиво для всех». Задача: **за 10 секунд понять, где я сейчас** — сон, экран, режим, тренировки, дела — и внести данные в два тапа.
 
-Key rule: The application **reads** the database and **writes only through `app/store.py`**. It never invents custom calculation logic — it uses `v_daily` and `report()` aggregates.
+Платформа: **Telegram Mini App** (веб-страница, открывается внутри Telegram). Часовой пояс отображения — **MSK (UTC+3)**, все даты — ISO.
 
-### 1. Data (Canonical Schema)
+Ключевая рамка: приложение **читает** базу и **пишет в неё только через `app/store.py`**. Своей логики расчёта метрик оно не придумывает — берёт то, что уже есть в `v_daily` и `report()`.
 
-SQLite `db/life.db` in WAL mode. Full DDL is defined in `app/store.py` → `DDL`. Fields used by the panel:
+### 1. Данные (фактическая схема, менять нельзя)
 
-- **`metrics`** — `ts` (ISO `YYYY-MM-DD` for daily entries), `kind`, `value` REAL, `unit`, `note`, `source` (default `chat`). Index on `(kind, ts)`.
-- **`workouts`** — `date`, `kind` (`strength`/`gym`/`cardio`/...), `duration_min`, `load` (`easy`/`moderate`/`hard`), `note`.
-- **`tasks`** — `title`, `project`, `due`, `priority` (1 highest ... 5 lowest), `status` (`open`/`done`/`dropped`), `done_at`.
-- **`events`** — `date`, `title`, `type`, `remind`, `status` (`active`/`cancelled`).
+SQLite `db/life.db`, режим WAL. Полный DDL — `app/store.py` → `DDL`. Поля, которые нужны панели:
+
+- **`metrics`** — `ts` (ISO `YYYY-MM-DD` для дневных), `kind`, `value` REAL, `unit`, `note`, `source` (по умолчанию `chat`). Индекс `(kind, ts)`.
+- **`workouts`** — `date`, `kind` (strength/gym/cardio/…), `duration_min`, `load` (easy/moderate/hard), `note`.
+- **`tasks`** — `title`, `project`, `due`, `priority` (1 высокий … 5 низкий), `status` (open/done/dropped), `done_at`.
+- **`events`** — `date`, `title`, `type`, `remind`, `status` (active/cancelled).
 - **`journal`** — `date`, `mood`, `energy`, `text`.
-- **`items`** / **`item_log`** — inventory items and logs (`used`/`skipped`/`restocked`).
-- **`facts`** — key-value persistent configuration facts.
-- **`tx`** — financial ledger (reserved; not exposed in Mini App).
-- **`v_daily`** — pre-aggregated daily view (sleep, workouts, mood). The panel reads **this view** rather than querying raw metrics.
+- **`items`** / **`item_log`** — инвентарь и отметки `used`/`skipped`/`restocked`.
+- **`facts`** — key→value, устойчивые факты.
+- **`tx`** — деньги (панель пока не показывает, таблицу не трогать).
+- **`v_daily`** — витрина по дням (сон, тренировки, настроение). Панель читает **её**, а не считает сама.
 
-Metrics (`METRIC_KINDS`, unit + allowed range): `weight, waist, sleep_hours, wake_time, bed_time, sleep_quality, steps, hr_rest, hr_max, mood, energy, stress, focus, calories, protein, water, screen_time, porn_count`. New kinds must be added to backend `METRIC_KINDS`, not on the frontend.
+Метрики (`METRIC_KINDS`, unit + допустимый диапазон): `weight, waist, sleep_hours, wake_time, bed_time, sleep_quality, steps, hr_rest, hr_max, mood, energy, stress, focus, calories, protein, water, screen_time, porn_count`. Новый вид — только добавлением в `METRIC_KINDS` на бэке, не в фронте.
 
-### 2. Domain Constraints
+### 2. Жёсткие правила предметной области (иначе цифры будут врать)
 
-1. **Logical day starts at 09:00.** All records between 09:00 and 08:59 of the next calendar day belong to the start date.
-2. **"Morning" = wake time, "Night" = bedtime**, regardless of clock hours.
-3. **`wake_time` / `bed_time` are stored as decimal hours** (`15.5` = 15:30). Frontend displays `HH:MM`. Bedtimes past midnight are valid values in range 0–24; when calculating duration across midnight, wrap around (`bed - wake`, if $\le 0 \rightarrow +24$).
-4. **Porn / masturbation is a daily counter** (`porn_count`), without streaks or "clean days". Any streak counter is strictly prohibited to avoid relapse-shame cycles.
-5. **Screen time is logged weekly** (Sunday), value represents weekly hours. Daily goal $\le 7$ h, weekly goal $\le 50$ h. Never display an unverified "today's screen time".
-6. **No moralizing in the UI.** Neutral language only: no "failure", "well done", or "bad day". Only facts and trends.
-7. **Empty days are normal.** A missed entry does not reset streaks or flash red.
+1. **Логический день начинается в 09:00.** Всё с 09:00 до 08:59 следующего дня пишется на дату начала. Причина: подъём ~15:00, отбой ~08:00 — иначе ночь разрывается на два дня.
+2. **«Утро» = момент подъёма, «ночь» = момент отбоя**, а не часы на стене. Так подписаны все экраны.
+3. **`wake_time` / `bed_time` хранятся как десятичные часы** (`15.5` = 15:30). На фронте показывать `HH:MM`. Отбой после полуночи — валидное значение в том же диапазоне 0–24; при расчёте длительности сна учитывать переход через полночь (`bed - wake`, если ≤ 0 → +24).
+4. **Порно/мастурбация — счётчик за день** (`porn_count`), без серий, стриков и «дней чистоты». Любой UI, который рисует «дней подряд», запрещён: срыв обнуляет серию → стыд → цикл.
+5. **Скринтайм вносится раз в неделю** (воскресенье), значение — часы в неделю. Дневная цель ≤ 7 ч, недельная ≤ 50 ч. Не показывать «сколько ты просидел сегодня».
+6. **Никаких оценок и морали в интерфейсе.** Нейтральные формулировки: не «провал», не «молодец», не «плохой день». Только факт и тренд.
+7. **Пустой день — это норма.** Пропуск не обнуляет серию и не подсвечивается красным.
 
-### 3. Application Views
+### 3. Экраны (MVP, пять штук)
 
-**1. "Today"** — Default landing view.
-- Header: Large logical date + wake time.
-- Overview cards: Sleep (hours, 7-day average), Screen time (hours/week, target $\le 50$), counter (today / average), Mood (latest).
-- Sparkline on each card (7–14 days).
-- Quick action button for logging.
-- Daily minimum checklist (wake & light, protein, routine).
+**1. «Сегодня»** — открывается по умолчанию.
+- Верх: дата логического дня крупно + время подъёма.
+- Четыре карточки: сон (ч, среднее за 7 дней), экран (ч/д за неделю, цель ≤7), фап (за день/среднее), настроение (последнее).
+- Спарклайн на каждой карточке (7–14 дней).
+- Кнопка «+» — быстрая запись (см. п.5).
+- Неснижаемый минимум дня, три галочки: подъём и свет / белок / рутина.
 
-**2. "Sleep"**
-- 7 / 30 / 90 day switcher.
-- Average sleep and delta comparison to previous period ($\ge 0.5$ h threshold).
-- Sleep duration bar chart with 4h baseline and 7.5h target line.
-- Wake time and bedtime spline charts with targets.
-- Interactive inspection tooltips.
+**2. «Неделя»**
+- Таблица 7 дней: подъём, отбой, сон, настроение, фап, тренировка.
+- Сравнение с предыдущей неделей по сну и экрану (стрелка + дельта, без вердикта).
+- Полоса прогресса до цели ≤50 ч экрана.
 
-**3. "Body"**
-- Four measurement cards: waist (weekly), biceps, forearm, thigh (monthly) with sparklines.
-- 1 cm noise threshold: deltas under 1 cm show as "no change".
-- Thigh asymmetry indicator.
-- 7-day workout strip and selected day details.
+**3. «Тренды»**
+- Выбор метрики (сон / настроение / экран / фап / вес, обхват живота).
+- График 30/90 дней, среднее по периоду, min/max.
 
-**4. "Tasks"**
-- Task list ordered by `priority`, then by `due`. Single-tap completion.
-- Upcoming events.
+**4. «Тело»**
+- Последняя тренировка и её содержание, число тренировок за неделю, дни с нагрузкой.
+- Обхват живота — раз в неделю, отдельная карточка с трендом.
 
-### 4. API Specification
+**5. «Дела»**
+- Список `tasks` по `priority`, потом по `due`. Отметка «сделано» — один тап.
+- Ближайшие `events`.
 
-Prefix `/api`, JSON format. Flat responses without excessive nesting.
+### 4. API (read-only ядро)
 
-```text
+Префикс `/api`, JSON, без авторизации на уровне эндпоинтов (авторизация — см. п.6). Все ответы — плоские, без вложенности глубже трёх уровней.
+
+```
 GET /api/health
-    -> {"ok": true, "version": "1.0"}
+    -> {ok, metrics_rows, db}
 
-GET /api/today
-    -> Today data, logical date, progress counter, sleep, mood, 18-week heatmap, checklist
+GET /api/summary?days=14
+    -> {period_days, since,
+        latest:[{kind, value, ts, unit}],
+        stats:{kind:{n, avg, min, max}},
+        daily:[v_daily...],
+        workouts:int, open_tasks:int, order:[...]}
 
-GET /api/sleep?days=7|30|90
-    -> Duration averages, deltas, sleep duration bars, wake/bed series
+GET /api/metrics?kind=sleep_hours&days=30
+    -> {kind, unit, days, points:[{day, value, note}]}
+    404 при неизвестном kind — не отдавать пустой массив молча.
 
-GET /api/body
-    -> 4 measurement cards, thigh asymmetry, 7-day workout strip and recent workout logs
-
-POST /api/tasks/{id}/done
-    -> Idempotent task completion {"ok": true}
+GET /api/workouts?days=14   -> {days, items:[{date, kind, duration_min, load, note}]}
+GET /api/tasks?status=open  -> {status, items:[{id, title, project, due, priority, status}]}
+GET /api/report?days=7      -> то же, что store.report()
 ```
 
-**API Rules:**
-- Read-only data queries must specify column selections.
-- Dates are ISO strings, never raw unix timestamps.
-- Aggregates come from `store.py` / `v_daily`, never recalculated manually in routers.
-- Errors return structured `{error: {code, message}}` with proper HTTP 4xx/5xx status codes.
+**Правила по API:**
+- Только чтение. Никаких `SELECT *` в прод-коде без списка полей.
+- Даты — ISO-строки, никаких unix-timestamp.
+- Все агрегаты — из `store.py` / `v_daily`, не пересчитывать в эндпоинте, если там уже есть.
+- Ошибка — `{error, detail}`, 4xx/5xx, не 200 с пустотой.
 
-### 5. Writing Data
+### 5. Запись (этап 2)
 
-The write endpoints invoke canonical functions in `app/store.py` (`add_metric`, `add_workout`, `add_task`) with server-side validation:
+Форма «+» пишет через **те же функции, что CLI** (`store.add_metric`, `store.add_workout`, `store.add_task`), с серверной валидацией диапазонов. Допустимые POST:
 
-```text
+```
 POST /api/metrics   {kind, value, date?, note?}
 POST /api/workouts  {kind, duration_min, load, date?, note?}
 POST /api/tasks     {title, project?, due?, priority?}
 POST /api/tasks/{id}/done
 ```
 
-Rules: Default `date` is the current logical day (09:00 MSK threshold); duplicates for the same metric kind on the same day are allowed (latest value takes precedence).
+Правила: `date` по умолчанию — текущий логический день (09:00-граница, MSK); ответ — созданная запись с `id`; дубли в один день по `kind` — разрешены, панель показывает последнее значение; оффлайн-очереди и синхронизации нет.
 
-### 6. Authorization & Access Control
+### 6. Авторизация и доступ
 
-Telegram Mini App supplies authentication parameters via `Telegram.WebApp.initData`.
-The backend validates HMAC-SHA256 signature against `BOT_TOKEN`, verifies `auth_date` freshness (within 24 hours), and restricts access strictly to `user.id == ALLOWED_USER_ID`. All unauthorized requests receive HTTP 403 Forbidden.
+Mini App открывается с `Telegram.WebApp.initData`. Бэкенд **обязан** проверять подпись HMAC-SHA256 (`secret = HMAC_SHA256("WebAppData", bot_token)`), сверять `auth_date` (не старше 24 ч) и пускать **только** `user.id == 483445453`. Всё остальное — 403.
 
-Production traffic must use HTTPS (via reverse proxy with TLS certificates or secure tunnel). Port 8099 binds locally to `127.0.0.1`. Secrets live in `.env`, never in code or repositories.
+Наружу — только HTTPS (Mini App иначе не открывается): домен + nginx + certbot, либо Cloudflare Tunnel для теста. Порт приложения слушает `127.0.0.1`, наружу не публикуется. Секреты — в `.env`, не в репозитории, не в коде.
 
-### 7. Tech Stack
+### 7. Рекомендуемый стек
 
-- **Backend:** Python + FastAPI, SQLite via `app/store.py` with WAL mode. Lightweight without heavy ORM or Alembic overhead.
-- **Frontend:** Single-page application using modern vanilla JavaScript, CSS custom properties, and native SVG for performance inside Telegram WebView.
-- **Theme:** iOS 18 True Dark OLED design system with SF Pro typography.
-- **Deployment:** systemd service (`priest-panel.service`) listening on `127.0.0.1:8099`.
+- **Бэкенд:** Python + FastAPI (уже стоит), SQLite через существующий `app/store.py`. Без ORM, без Alembic — схема уже версионируется в `store.migrate()`.
+- **Фронт:** одна страница, **без шага сборки** на старте — ванильный JS + инлайновый SVG для графиков. React/сборку вводить только если экранов станет больше семи. Тяжёлые чарт-библиотеки с CDN в Telegram WebView тормозят.
+- **Тема:** тёмная, переменные `--tg-theme-*`, чтобы наследовать тему пользователя.
+- **Деплой:** systemd-юнит + nginx-реверс-прокси. Никакого Docker на этом этапе — незачем.
+- **Репозиторий:** отдельный, панель не тащит за собой `db/`. База подключается путём к `life.db`, монтируется в конфиге.
 
-### 8. Anti-Patterns to Avoid
+### 8. Чего не делать
 
-- Do not introduce secondary sources of truth (JSON files, Google Sheets, local storage state).
-- Do not execute raw SQL queries from API routes.
-- Do not compute conflicting metric formulas on the frontend.
-- Do not add gamification mechanics: streaks, badges, confetti, or guilt-inducing warnings.
-- Do not add unrequested push notifications or marketing splash screens.
+- Не заводить второй источник правды (JSON, Google Sheets, localStorage как хранилище).
+- Не писать в базу сырым SQL из API.
+- Не считать метрики на фронте «своими формулами» — расхождение с CLI убьёт доверие к цифрам.
+- Не добавлять геймификацию: стрики, ачивки, «дней без срыва», уровни, конфетти.
+- Не добавлять уведомления и напоминания в MVP.
+- Не делать красивый onboarding, экраны входа, профили.
 
-### 9. Definition of Done
+### 9. Definition of Done для MVP
 
-1. Opens reliably in Telegram via HTTPS.
-2. "Today" displays live data from `life.db`.
-3. Sleep view supports 7, 30, and 90 day adaptive views with gaps for missing days.
-4. Tasks can be inspected and marked as done idempotently.
-5. `initData` is validated; unauthorized IDs receive 403 Forbidden.
-6. Writes execute exclusively via `store.py`.
-7. Zero crashes on empty databases or missing dates.
+1. Открывается в Telegram на телефоне по https.
+2. «Сегодня» показывает реальные данные из `life.db` за последние 14 дней.
+3. Тренды строятся по любой из пяти метрик, окна 30/90 дней.
+4. «Дела» читаются и отмечаются «сделано».
+5. `initData` валидируется, чужой user_id получает 403.
+6. Запись идёт только через `store.py`; в коде API нет ни одного `INSERT`/`UPDATE`.
+7. Приложение не падает при пустой базе и при днях без данных.
 
-### 10. Design & Visual System
+### 10. Известные шероховатости (решить по ходу)
 
-- **Palette:** Pure OLED `#000000`, card background `rgba(28, 28, 30, 0.65)`, borders `rgba(255, 255, 255, 0.08)`.
-- **Text:** Primary `#FFFFFF`, secondary `rgba(235, 235, 245, 0.6)`, tertiary `rgba(235, 235, 245, 0.3)`.
-- **Accents:** iOS Blue (`#007AFF`), iOS Cyan (`#32ADE6`), iOS Green (`#34C759`), iOS Orange (`#FF9500`).
-- **Typography:** `-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", sans-serif`. Tabular figures for numbers.
-- **Spacing & Radius:** 16px horizontal container padding, 20px card border radius, clean separation without visual clutter.
+- `wake_time`/`bed_time` как десятичные часы — некрасиво, но уже так записано; менять формат в БД не надо, конвертировать на фронте.
+- `screen_time` смешивает недельные (телефон) и потенциально дневные значения — в UI подписывать «ч/нед», не «ч/д», пока не появится дневной сбор.
+- `v_daily` не содержит `porn_count` — если нужен в таблице недели, добавить колонку в вьюху, а не считать на фронте.
 
-### 11. Heatmap Specification
+### 11. Визуальный слой (не «просто таблички»)
 
-18 weeks (126 days), GitHub-style grid organized by weeks.
-- Legend: 6 clear gradient levels (`none`, `0`, `1–49`, `50–74`, `75–99`, `100`).
-- Gray dot indicator for days with completed workouts.
-- Tap interaction shows formatted day details.
-- Strictly prohibited: streak counters or judgment labels.
+Приложение должно вызывать желание открыть его. Это не украшательство: если не хочется заходить, данные не вносятся и всё умирает. Но красота достигается дисциплиной, а не количеством элементов.
 
-### 12. Sleep Drift & Trend Charts
+**Палитра (тёмная, фиксированная):**
+- фон `#0B0D10`, поверхность `#14171C`, линия `rgba(255,255,255,0.06)`
+- текст `#E9ECF1`, вторичный `#8A93A6`
+- акцент `#7C9CFF` (один на всё приложение)
+- предупреждение `#FF8A5B` — только для реальной аномалии (подъём сдвинулся на >2 ч), не для «плохого дня»
 
-- Sleep duration: Bar chart with 4h baseline and 7.5h target line.
-- Wake time and Bedtime: Spline curves with target markers and time formatted as `HH:MM`.
-- Interactive tooltip reveals exact values on tap/hover.
+**Типографика:** Inter / SF Pro. Числа — 34–40 px, `font-variant-numeric: tabular-nums`, вес 650, буква -0.02em. Подписи — 11 px, uppercase, tracking .6px. Никаких трёх размеров шрифта на одном экране.
 
-### 13. Service Management
+**Воздух:** padding карточки 16–18 px, радиус 18–20 px, зазор сетки 10–12 px, между блоками 24 px. Один экран = один смысловой блок, не шесть.
 
-- **Status:** `sudo systemctl status priest-panel`
-- **Restart:** `sudo systemctl restart priest-panel`
-- **Logs:** `sudo journalctl -u priest-panel -f`
-- **Config:** `nano /root/priest/.env`
+**Глубина:** вместо рамок — мягкая тень `0 1px 0 rgba(255,255,255,.04) inset` + `0 8px 24px rgba(0,0,0,.35)`. Никаких градиентных «стеклянных» панелей и неона.
+
+**Движение (минимум, но обязательно):**
+- появление карточек каскадом: `translateY(8px) + opacity`, задержка 40 мс между карточками, 260 мс, ease-out;
+- числа считаются вверх от 0 за 400 мс при первом рендере;
+- переход между вкладками — fade 150 мс, без слайдов;
+- скелетоны вместо спиннеров; при обновлении цифра не «прыгает», а плавно перетекает.
+Всё остальное (параллакс, blur-анимации, конфетти) — запрещено.
+
+**Композиция главного экрана:**
+1. Верх — крупно дата логического дня, под ней одна строка-инсайт (см. п.12).
+2. Кольцо прогресса на одно число: недельный экран против цели ≤50 ч. Одно кольцо, не три.
+3. Сетка 2×2 — сон / настроение / фап / тренировки. Внутри каждой — крупное число, дельта к прошлой неделе, спарклайн тонкой линией 1.5 px, без заливки.
+4. Ниже — хитмап (п.12).
+5. Ниже — «следующий шаг» одной строкой.
+
+**Правила:** максимум один акцентный цвет; ни одной иконки, которую нельзя объяснить одной строкой; эмодзи в интерфейсе не используются; числа всегда с единицей измерения.
+
+### 12. Полезные фичи (по приоритету)
+
+**1. Хитмап — да, нужен. Но не по всем метрикам.**
+GitHub-подобная сетка 90–180 дней, 4–5 строк, каждая ячейка = логический день:
+- `сон ≥ 7 ч`
+- `подъём в окне ±60 мин от текущей цели`
+- `тренировка`
+- `рутина сделана`
+- `белок в первом приёме`
+
+Интенсивность не нужна — достаточно «было/не было» и нейтрального серого вместо зелёного/красного (никакой оценки, см. п.2.6). Клик по ячейке — карточка дня. Главная ценность: **видно паттерн по неделям**, а не «вчера было плохо».
+
+**Хитмап по `porn_count` запрещён.** Это ровно та же серия, только нарисованная квадратиками: пропуск превращается в дырку в узоре и в стыд. Считать частоту — да, рисовать «дни чистоты» — нет.
+
+**2. График дрейфа фазы сна (главная фича приложения).**
+Ось X — дни, ось Y — время подъёма, точки вместо линии, горизонтальная пунктирная линия — текущая цель. Показывает то, чего не видно ни в одном среднем: как фаза едет. Читается за секунду: точки ползут вверх = режим уезжает.
+
+**3. Строка-инсайт.** Одна фраза, генерируется правилами, не ИИ: «подъём сдвинулся на +1:10 за 3 дня», «экран 41 ч за неделю — на 9 ч меньше прошлой», «5 дней без тренировки». Максимум одна на экран. Нет что сказать — строки нет.
+
+**4. Сравнение с прошлой неделей** — маленькие дельты `+0.4 ч` / `−9 ч` рядом с числом, серым, без стрелок-вердиктов.
+
+**5. «Следующий шаг»** — одна задача с самым высоким приоритетом, крупно, с кнопкой «сделано». Не список из десяти.
+
+**6. Карточка дня** — по тапу на день: сон, подъём/отбой, тренировка с содержанием, заметка, отметки рутины. Это заменяет дневник.
+
+**Чего не делаем даже «для красоты»:** ачивки, уровни, стрики, «дней без срыва», рейтинги, шеринг, виджеты, тёмную/светлую тему на выбор (только тёмная), настройки.
+
+### 13. Функциональные требования (детально)
+
+Раздел для реализации. Каждый пункт — либо выполняется буквально, либо требует согласования. UI-решения (цвета, отступы, анимации) — свободны в рамках п.11, поведение — нет.
+
+#### 13.1. Глобальное поведение
+
+**Логический день.** «Сегодня» = дата, начавшаяся в 09:00 MSK. С 09:00 и до 08:59 следующего дня панель считает это одним днём. В 08:59 → 09:00 происходит переключение: экран «Сегодня» обнуляется на новый день, вчерашний уходит в историю. Метка дня в шапке — `23 октября` + мелким `логический день`.
+
+**Часовой пояс.** Всё отображается в MSK (UTC+3) жёстко, независимо от часового пояса устройства. Если сервер в UTC — конвертировать на бэке, не на фронте.
+
+**Состояния экрана.** Обязательны четыре, для каждого блока отдельно:
+- `loading` — скелетон той же формы, что и данные (не спиннер);
+- `empty` — фраза + иконка-ничего: «данных за этот день нет», «пока нет тренировок»;
+- `error` — «не удалось загрузить» + кнопка «повторить», без технических стектрейсов;
+- `stale` — данные старше 24 ч (нет сети / база не обновлялась) → мелкая пометка «данные от 22.10».
+
+**Обновление.** Pull-to-refresh на всех экранах. Автообновление при возврате на вкладку, если прошло >60 с. Без websocket и polling.
+
+**Навигация.** Пять вкладок внизу: Сегодня, Неделя, Тренды, Тело, Дела. Активная — акцентным цветом, без подписей-иконок-дублей. Состояние вкладки и выбранной метрики — в URL, чтобы работала кнопка «назад» внутри Telegram.
+
+**Оффлайн.** Показывать последний успешный ответ из кэша с пометкой `stale`. Запись оффлайн не буферизуется — кнопка записи неактивна с подписью «нет связи».
+
+**Пустая база.** Приложение открывается, все блоки в `empty`, ни одного `NaN`, ни одного деления на ноль, ни одного красного экрана.
+
+#### 13.2. Экран «Сегодня»
+
+Порядок блоков сверху вниз:
+
+1. **Шапка.** Дата логического дня (крупно), под ней — строка-инсайт (п.13.9), если правило сработало. Если нет — строки нет, блок не резервирует пустоту.
+2. **Кольцо прогресса.** Одно число: экран за текущую неделю / цель ≤50 ч. В центре — `41 / 50 ч`. Если данных за неделю нет — кольцо пустое с подписью «нет данных». Если перебор — кольцо заполняется полностью, цвет не меняется на красный, подпись `+3 ч к цели`.
+3. **Сетка 2×2.** Карточки: Сон, Настроение, Фап, Тренировки.
+   - **Сон** — часы последнего логического дня, крупно `7,5 ч`. Вторая строка: `подъём 15:30` (из `wake_time`, формата `HH:MM`). Третья: среднее за 7 дней. Спарклайн 14 дней.
+   - **Настроение** — последнее значение `/10`, дельта к среднему за прошлую неделю. Нет данных — `—` и «нет отметки».
+   - **Фап** — `porn_count` за сегодня, крупно. Вторая строка — среднее за 7 дней. Спарклайн 14 дней **разрешён**: это частота, не серия.
+   - **Тренировки** — число за 7 дней (`3`), вторая строка — название последней и сколько дней назад (`молотки · 1 день назад`).
+4. **Минимум дня.** Три отметки: `подъём и свет`, `белок`, `рутина`. Каждая — тап переключает `не отмечено → сделано`. Хранится как `metrics`: `wake_light`, `protein_ok`, `routine_ok` со значением 1/0 (добавить в `METRIC_KINDS` как 0..1). Отметка идемпотентна: повторный тап в тот же день перезаписывает, не создаёт дубль.
+5. **Следующий шаг.** Одна задача с минимальным `priority`, затем по `due`. Кнопка «сделано» → `POST /api/tasks/{id}/done`, блок заменяется следующей задачей с fade. Пусто — «открытых дел нет».
+
+**Правила:** никаких агрегатов «за всё время» на этом экране. Ни одного блока без данных — вместо него `empty`.
+
+#### 13.3. Экран «Неделя»
+
+1. **Переключатель недель** — стрелки ‹ ›, по умолчанию текущая (7 логических дней, заканчивая сегодня).
+2. **Таблица 7 строк** (сверху — сегодня, ниже — назад): дата, подъём `15:30`, отбой `07:40`, сон `7,5 ч`, настроение `4`, фап `1`, тренировка `✓` или `—`. Дни без данных — строка с прочерками, не скрывается.
+3. **Дельты к предыдущей неделе** — три строки: сон (среднее), экран (сумма), тренировки (число). Формат `7,4 → 7,9 (+0,5)`. Без стрелок-вердиктов и без цвета.
+4. **Цель по экрану** — полоса: `41 ч / 50 ч`, процент. Источник — `screen_time` за неделю.
+
+**Правила:** неделя начинается в понедельник, но «текущая» — скользящие 7 дней до сегодня; переключатель двигает окно на 7 дней. Частичные недели не выдаются за полные: если в окне <7 дней данных, писать `6 из 7 дней с данными`.
+
+#### 13.4. Экран «Тренды»
+
+1. **Селектор метрики** — горизонтальный скролл чипов: Сон, Подъём, Отбой, Настроение, Экран, Фап, Обхват живота, Вес. Список фиксированный, из `METRIC_KINDS`.
+2. **Окно** — переключатель `30 / 90 дней`.
+3. **График.** Линия 1,5 px, точки только при ≤31 точке в окне. Пропуски: если между точками >2 дней — **линия рвётся**, а не соединяет через пустоту. Ось Y — с единицей, ось X — даты без подписей на каждой точке (максимум 4 подписи).
+4. **Сводка под графиком:** среднее, минимум, максимум, число дней с данными (`12 из 30`).
+5. **Спец-режим для «Подъём»/«Отбой».** Y — время суток, а не число. Значения < 09:00 сдвигаются на +24, чтобы график не разрывался на полуночи. Подписи оси — как `HH:MM`. Этот режим включается автоматически для `wake_time` и `bed_time`.
+
+**Правила:** не сглаживать график, не рисовать трендовую линию поверх данных, не показывать «прогноз».
+
+#### 13.5. Экран «Тело»
+
+1. **Обхват живота** — последнее значение, дата, дельта к предыдущему замеру, спарклайн всех замеров.
+2. **Тренировки.** Число за 7 дней, число за 30, последняя — с содержанием из `note` (полный текст, если длиннее 3 строк — «показать полностью»).
+3. **Календарь нагрузки** — компактная сетка последних 28 дней: день с тренировкой = акцент, без = фон, нет данных = прозрачный.
+4. **Вес** — если есть `weight`, карточка с трендом; если нет — карточка не показывается вообще (не «0 кг»).
+
+#### 13.6. Экран «Дела»
+
+1. **Открытые** — сортировка: `priority` (1 → 5), затем `due` (пустые в конце), затем дата создания. В строке: заголовок, проект мелким, дедлайн (`до 30.10`, просроченный — `просрочен на 2 дня`, без красного фона).
+2. **Отметка «сделано»** — свайп вправо или чекбокс. После отметки строка уходит с анимацией 200 мс, счётчик обновляется.
+3. **Выполненные за 7 дней** — свёрнутый блок, по тапу раскрывается.
+4. **События** — ближайшие 5 из `events` с `status=active`, отсортированные по дате.
+5. **Добавление** — кнопка «+»: заголовок (обязательно), проект, дедлайн, приоритет. Валидация: пустой заголовок — кнопка неактивна.
+
+**Правила:** не показывать выполненные в общем списке; не считать «продуктивность» в процентах.
+
+#### 13.7. Хитмап
+
+Расположение: на «Сегодня» под карточками, либо отдельной вкладкой при перегрузке. Сетка: колонки = недели, строки = 5 привычек (порядок фиксирован):
+
+1. `сон ≥ 7 ч` — `sleep_hours >= 7`
+2. `подъём в окне` — `|wake_time − цель| ≤ 60 мин` (цель из `facts.wake_target`, по умолчанию 14:00)
+3. `тренировка` — есть запись в `workouts` за день
+4. `рутина` — ≥2 записи `used` в `item_log` за день
+5. `белок` — `protein > 0` за день (если не ведём — строка скрывается, а не показывает нули)
+
+**Правила ячеек:**
+- «было» — акцентный цвет с прозрачностью 100%;
+- «не было» — фон карточки, еле заметная рамка;
+- «нет данных» — прозрачно-пустая с пунктиром; **не** приравнивается к «не было»;
+- клик/тап — карточка дня (п.13.10);
+- окно — 90 дней, при ширине экрана <380 px показывать 12 недель с горизонтальным скроллом;
+- легенда — три состояния, одна строка, без «меньше/больше».
+
+**Запрещено:** строка по `porn_count`, интенсивность по количеству, любые «стрики» и счётчики подряд идущих дней.
+
+#### 13.8. Формулы и пороги
+
+- **Длительность сна** — только из `sleep_hours`. Не вычислять из `bed_time`/`wake_time` (неточные значения, переход через полночь). Нет `sleep_hours` → `—`.
+- **Дрейф фазы** — по последним 7 точкам `wake_time`, значения < 09:00 → +24 ч. Линейный тренд (МНК), результат в минутах в день. Формат: `+18 мин/день`. Меньше 4 точек — не считать, показать `мало данных`.
+- **Среднее** — по дням, где значение есть; пустые дни **не** считаются нулями.
+- **Дельта к прошлой неделе** — разница средних (для счётчиков — сумм), знак обязателен, единица обязательна.
+- **Порог «аномалии»** для цвета предупреждения — только два случая: дрейф фазы > 60 мин/день или подъём сдвинулся > 2 ч за 3 дня. Всё остальное — нейтрально.
+
+#### 13.9. Правила инсайта (одна фраза на экран, максимум одна)
+
+Проверять по порядку, показывать первое сработавшее:
+
+1. Нет записей 3+ дня → `3 дня без записей`.
+2. Дрейф подъёма за 3 дня > 45 мин → `подъём сдвинулся на +1:10 за 3 дня`.
+3. Экран за неделю > 50 ч → `экран 58 ч — на 8 ч выше цели`.
+4. Экран за неделю ниже прошлой на ≥5 ч → `экран 41 ч — на 9 ч меньше прошлой недели`.
+5. Нет тренировок 5+ дней → `5 дней без тренировок`.
+6. Среднее настроение за 3 дня < 4 → `настроение ниже обычного 3 дня`.
+7. Иначе — инсайта нет.
+
+Тон — только факт, без оценки. Запрещены слова: провал, срыв, молодец, отлично, плохо.
+
+#### 13.10. Карточка дня
+
+Открывается тапом по ячейке хитмапа или строке «Недели». Содержит: дату, подъём/отбой, сон, настроение, фап, тренировки с полным `note`, отметки минимума дня, свободную заметку (`journal.text`). Действия: «изменить» (только для заметки и отметок), «закрыть». Никакого удаления записей из UI — исправления через CLI/чат.
+
+#### 13.11. Запись (валидация и поведение)
+
+- Диапазоны — те же, что в `METRIC_KINDS`; вне диапазона — ошибка `400` с человеческим текстом (`сон должен быть от 0 до 24 ч`), значение не сохраняется.
+- `wake_time`/`bed_time` вводятся как `HH:MM`, на бэк уходят десятичными часами.
+- Дубль по тому же `kind` в тот же день — разрешён, показывается последний; в карточке дня видно `изменено в 18:42`.
+- Дата по умолчанию — текущий логический день; менять дату можно только на прошлые 7 дней (защита от случайного ввода в будущее).
+- После успешной записи — тактильный отклик, обновление только затронутого блока, без полной перезагрузки.
+
+#### 13.12. Приёмка (проверять в таком порядке)
+
+1. Пустая база → все блоки `empty`, ошибок нет.
+2. Один день с данными → «Сегодня» корректен, хитмап показывает одну заполненную ячейку.
+3. Данные с разрывами → график рвётся, средние не занижены.
+4. Переход 08:59 → 09:00 → «Сегодня» переключился на новый день.
+5. `wake_time = 2.5` → отображается `02:30`, график не ломается.
+6. Перебор по экрану → кольцо полное, подпись `+N ч к цели`, без красного.
+7. Отметка «сделано» на задаче → исчезает из списка, следующая подставляется.
+8. Нет сети → `stale`-пометка, приложение работает на кэше.
+9. Чужой `user_id` → 403, приложение показывает «нет доступа».
+10. В коде нет `INSERT`/`UPDATE` — только вызовы `store.*`.
+
+### Порядок работ
+
+1. **Схема и CLI** — сделано.
+2. **Накопить 2–3 недели данных** — идёт.
+3. **Панель на чтение** (экраны 1–5 на существующих эндпоинтах) — следующий шаг.
+4. **Запись через форму** + авторизация.
+5. **Бот-ввод** и напоминания — только после того, как панелью реально пользуешься.
+
+## Правила
+
+- Перед миграцией — копия `db/life.db` в `db/backups/life-<дата>.db`.
+- `posts.db` и прочие чужие базы в `db/` не тащим без явного решения — отдельный проект.
+- Секреты бота/туннеля — в `.env` профиля, не в коде и не в `workspace`.
+
+## 14. Ответы на вопросы ИИ-агента (2026-10-23)
+
+### 14.1 Кольцо скринтайма со вторника по субботу
+
+Показывать **последнюю завершённую неделю**, а не пустое кольцо и не ноль.
+
+- `screen_time` вносится одной цифрой с датой воскресенья (`ts` = воскресенье окончания недели). Читаем последнюю запись строго **до** начала текущей недели.
+- Под кольцом подпись с диапазоном: `13–19 окт`. Без подписи цифра вводит в заблуждение.
+- Когда в воскресенье вносится новая сумма — кольцо сразу показывает её, подпись меняется на новую неделю.
+- Если записей нет вообще — `empty`-состояние («скринтайм ещё не вносился»), не ноль.
+- Никогда не «дотягиваем» кольцо пропорционально дню недели: это ложь и ломает недельную метрику.
+
+### 14.2 Схема БД и «недостающие» метрики
+
+Таблица `metrics` — **generic** (`kind`, `value`, `unit`, `ts`), отдельной миграции под новые виды метрик не нужно: новый `kind` = новая строка. Валидация диапазонов идёт в `METRIC_KINDS` (`app/store.py`), там уже есть `wake_light`, `protein_ok`, `routine_ok` (0/1), `wake_time`, `bed_time`, `waist`, `screen_time`, `porn_count`.
+
+`facts.wake_target` — есть, значение `14:30`.
+
+Представление `v_daily` изначально было **неполным** (это была неточность ТЗ, агент поймал верно). Теперь оно приведено к 15 колонкам и пересоздаётся автоматически при каждом `migrate()`:
+
+`day, sleep_hours, wake_time, bed_time, weight, waist, mood, energy, porn_count, screen_time, wake_light, protein_ok, routine_ok, workout_min, workout_count, net_money`
+
+`SCHEMA_VERSION = 4`. Фронтенду миграции писать не нужно: он только читает.
+
+### 14.3 Чистый монолит vs Vite + Vanilla JS
+
+**Vite разрешён** при четырёх условиях:
+
+1. **Никаких фреймворков.** Ни React, ни Vue, ни Svelte, ни Tailwind. Только Vanilla JS/TS + CSS.
+2. **Нулевые runtime-зависимости.** Никаких Chart.js, D3, lodash, dayjs, axios (хватит `fetch`). Графики — SVG/canvas руками, их там три штуки.
+3. На выходе — **статические файлы**, которые отдаёт FastAPI через `StaticFiles`. Ни SSR, ни серверных функций, ни env-переменных в рантайме.
+4. `npm run build` кладёт результат в `web/dist`, и **собранные файлы коммитятся**. На сервере Node.js не нужен и не будет.
+
+Исходники при этом модульные (`src/screens/`, `src/api.js`, `src/charts/`) — это нормально, монолитом должен быть только артефакт сборки.
+
+### 14.4 Где забрать store.py и структуру базы
+
+`exports/db-contract/`: `store.py`, `life.py`, `schema.sql` — фактический DDL из `db/life.db`. Источник правды — рабочая копия, файлы в `exports/` обновляются по запросу.
+
+**Никаких своих таблиц, своих миграций и своих DDL на стороне панели.** Только чтение через `store.rows()` / `store.get_*` и запись через существующие функции `store.add_*`.
+
+## 15. Пересмотр экрана «Сегодня» (заменяет 13.2 и 13.3)
+
+Причина: первая сборка сделала все метрики равными карточками. Экран, на котором шесть показателей одного веса, не отвечает ни на один вопрос. Вводится иерархия.
+
+### 15.1 Главный элемент — сон и подъём, не экран
+
+Кольцо в геройском слоте показывает **сон за прошедшую ночь** относительно цели 7,5–8 ч. Рядом крупно — **время подъёма**, под ним — целевое время подъёма из `facts.wake_target` и сдвиг в часах и минутах.
+
+Обоснование: сон и фаза — единственная метрика, которую пользователь может сдвинуть сегодня и которая тянет за собой настроение, аппетит, приступы и энергию. Экранное время — ограничитель, а не компас: это недельная цифра, тормоз, а не ежедневное действие.
+
+Экранное время переезжает вниз, в компактную строку-лимит: `41 / 50 ч` + подпись недели, без кольца и без геройского слота.
+
+### 15.2 Состав экрана (сверху вниз)
+
+1. Шапка: дата, метка «логический день», MSK.
+2. **Кольцо: сон** + крупно время подъёма + сдвиг от цели.
+3. Инсайт-строка: одно предложение, нейтральный фон. Оранжевый — только при сдвиге подъёма > 2 ч или отсутствии данных > 24 ч.
+4. Три карточки-факта, все **только для чтения**:
+   - **Тренировка** — «да / нет» + тип (силовая / ЛФК / кардио) + «N из 7 дней». Никаких минут и тоннажа: цифры объёма провоцируют перебор, который у пользователя уже был.
+   - **Белок в первом приёме** — да / нет / нет данных.
+   - **Вечерняя рутина** — да / нет / нет данных.
+5. Строка-лимит: экран за прошлую неделю `41 / 50 ч`, подпись диапазона дат.
+6. **Следующий шаг** — верхняя открытая задача из `tasks` (по `due`, затем `priority`). Только текст и срок.
+
+### 15.3 Чего на «Сегодня» быть не должно
+
+- **Счётчик ФАП.** Учёт остаётся в базе (нужен для корреляций), но на экран не выводится ни числом, ни графиком. Видимый ежедневный счётчик — это табло со стыдом: либо начинаешь врать, либо перестаёшь открывать приложение.
+- **Настроение как дневная карточка.** Уходит в «Тренды» как 7-дневное среднее. Причина не в стыде, а в шуме: колебание на 1 пункт ничего не значит, а тренд за две недели значит много (и пригодится на приёме у психиатра).
+- **Интерактивные чекбоксы.** Пользователь не отмечает ничего руками — он отчитывается в чате, записи в базу делает ассистент. Любая галочка, которую надо нажимать, — это вторая работа и повод не открывать приложение.
+- **Дельты меньше 1 пункта** («−0,1 к прошлой») — ложная точность.
+- **Задачи ассистента и разработчика.** В карточку «Следующий шаг» попадают только задачи пользователя из `tasks`.
+
+### 15.4 Хитмап
+
+Состав строк: сон ≥ 7 ч, подъём в окне цели, тренировка, рутина, белок. Пять строк, 12 недель. `porn_count` — не показывать никогда. Пустые дни — серые «нет данных», не «не было». Пока данных меньше двух недель, блок показывать не нужно вовсе.
+
+### 15.5 Проверка приёмки этого блока
+
+1. На экране нет ни одного чекбокса и ни одной кнопки «Сделано».
+2. Кольцо показывает сон, а не экран.
+3. Цифра ФАП не встречается в разметке.
+4. «Следующий шаг» совпадает с верхней задачей из `tasks` (`life.py tasks`).
+5. Если данных за ночь нет — кольцо пустое с подписью «нет данных», а не 0.
+
+## 16. Кольцо, графики, шкала настроения, экран «Неделя»
+
+### 16.1 Кольцо под задачи — нет
+
+Кольцо — виджет «выполнение цели». Ежедневных целей у пользователя нет: открытые задачи это разовые дела сроком на недели (офтальмолог, анализы). Кольцо из них покажет `0 из 2` и будет стоять мороженым всю неделю, а внутри недели начнёт провоцировать выдумывать дела ради заполнения кольца. Это ровно та геймификация, которая запрещена.
+
+Правило: **на «Сегодня» кольца нет вообще.** Главный элемент — не кольцо, а график дрейфа фазы подъёма (см. 16.2). Единственное место, где кольцо уместно, — доля недельного лимита экрана, и там уже стоит полоса. Кольцо ради кольца не рисуем.
+
+### 16.2 Графики: что добавляем
+
+Все графики живут на «Трендах» и на «Неделе», не на «Сегодня». Переключатель периода: 7 / 30 / 90 дней.
+
+1. **Дрейф фазы подъёма** — линия по дням, ось Y = время подъёма, горизонтальная линия цели из `facts.wake_target`. Главный график приложения.
+2. **Сон** — столбики по дням, линия цели 7,5 ч. Разрыв шкалы от 0 не нужен, начинать с 4 ч, чтобы различия между днями были видны.
+3. **Настроение** — линия 7-дневного скользящего среднего, без дневных точек.
+4. **Экран** — столбики по неделям, линия лимита 50 ч.
+5. **Обхват живота** — точки раз в неделю, линия тренда.
+6. **Тренировки** — хитмап (16.3 старого раздела), не график.
+
+Правило пустых данных: график рисуется только если точек ≥ 7. Иначе вместо него текст «нужно ещё N дней». Ось времени всегда непрерывная: пропущенный день — разрыв линии, а не ноль и не соединение через пустоту.
+
+### 16.3 Настроение: пять лиц вместо 1–10
+
+Пользователь не оценивает себя числом. Ввод — **пять смайлов**, без цифр на экране. Внутреннее представление в базе не меняется: `mood` остаётся шкалой 1–10, лицо мапится в 2 / 4 / 6 / 8 / 10. Это убирает миграцию и сохраняет совместимость с уже записанными значениями.
+
+Подписи под лицами (обязательны, иначе непонятно, что означает нейтральное): «плохо», «так себе», «нормально», «хорошо», «отлично».
+
+Средние и тренды считаются по внутренним числам, на экран выводятся текстом («в среднем «так себе»»), а не «5,4 из 10».
+
+### 16.4 Экран «Неделя» — правки
+
+1. **Нарезка недели неверная.** На скриншоте «17 окт — 23 окт»: 17 октября 2026 — суббота, то есть неделя идёт сб→пт. Должно быть понедельник→воскресенье. Для недельных агрегатов использовать календарную неделю Пн–Вс.
+2. **Дельты меньше значащего порога не показывать.** «Сон +0,1 ч (7,1 → 7,2)» — это 6 минут, шум. Порог: сон 0,5 ч, экран 2 ч, тренировки 1 день.
+3. **Значок-галочка справа без легенды** — убрать или подписать. Сейчас непонятно, что он означает (и он стоит у 22 и 19 октября без видимой причины).
+4. **Отбой после полуночи помечать.** В таблице «отбой 08:00» относится к следующему календарному утру, а строка — к логическому дню. Писать `08:00 (+1)` или ставить стрелку, иначе данные читаются как вечерние.
+5. **Заголовки колонок повторять один раз** в шапке таблицы, а не в каждой строке.
+6. Порядок в таблице — новые сверху, «сегодня» подсвечен.
+
+### 16.5 Проверка приёмки
+
+1. Кольца на «Сегодня» нет; главный элемент — график подъёма.
+2. Неделя начинается с понедельника.
+3. Ввод настроения — пять лиц, цифр на экране нет.
+4. Дельты ниже порога не отображаются.
+5. На «Неделе» нет неподписанных значков.
+
+## 17. Якоря дня и процент выполнения (заменяет 15.4 и раздел про хитмап)
+
+### 17.1 Почему не «процент от задач»
+
+Процент должен иметь одинаковый знаменатель каждый день, иначе цвета хитмапа несравнимы. Разовых задач недостаточно: они живут неделями, и в день без задач знаменатель равен нулю — деление на ноль и «100% из ничего».
+
+Знаменатель — **пункты дня**: активные якоря + задачи, у которых срок на этот день.
+
+### 17.2 Таблица `habits`
+
+Поля: `key`, `title`, `rule` (JSON), `active_from`, `active_to` (NULL = действует), `sort`, `note`.
+
+Типы правил: `metric_ge` (метрика ≥ значения за день), `workouts_ge` (тренировок ≥ N), `wake_window` (подъём в пределах ±N минут от `facts.wake_target`).
+
+Стартовый набор: `sleep_ge_7`, `wake_window`, `workout_day`, `protein_ok`, `routine_eve`. Отдельно заведён, но выключен: `walk_30` («Ходьба ≥ 30 мин», метрика `walk_min`).
+
+### 17.3 Управление составом
+
+- `life.py habits [--all]` — список с правилами и статусом.
+- `life.py habit add --key K --title T --rule '{json}' [--sort N]` — добавить или включить обратно.
+- `life.py habit off K` — выключить со вчерашнего дня; история до этой даты сохраняется.
+- `life.py score [дата]` — счёт дня: `done / total / percent` и список пунктов.
+- `life.py hitmap [дней]` — массив по дням для сетки.
+
+День без единой записи в `metrics`/`workouts` возвращает `total = 0` и `percent = null`: «нет данных» — не то же самое, что «ноль сделанного».
+
+### 17.4 Задачи со сроком
+
+Задача с `due = день` входит в знаменатель этого дня и считается выполненной при `status = 'done'`. Это единственный элемент с кнопкой «Done» в интерфейсе: у якорей есть объективный источник данных, у личных дел вроде «сходить на встречу» — нет.
+
+### 17.5 Хитмап
+
+Пять градаций цвета по проценту плюс отдельное состояние «нет данных» (пунктирная рамка). Пересчёт — только в `store.hitmap()`; фронтенд цвет не вычисляет.
+
+## 18. Замеры тела (экран Body, четыре карточки)
+
+### 18.1 Набор
+
+| metric kind | что | частота | точка |
+|---|---|---|---|
+| `waist` | талия | раз в неделю, воскресенье | по пупку, стоя, на выдохе |
+| `biceps_r` | бицепс правый | раз в месяц | напряжённая, по центру брюшка |
+| `forearm_r` | предплечье правое | раз в месяц | у локтя, в самом широком месте |
+| `thigh_r`, `thigh_l` | бедро правое и левое | раз в месяц | середина бедра |
+
+`thigh_l` карточкой не показывается — он нужен для разницы с правым (`store.thigh_asymmetry()`).
+
+Отброшены: шея и грудь — точность ленты ±1–1,5 см, месяц замеров даёт шум; шея используется только в формулах процента жира (±5%), для решений бесполезна.
+
+### 18.2 Правила
+
+- Мерить в одно время (утро, до еды, после туалета) и в одной точке.
+- Дельта меньше 1 см — шум: показывать «без изменений», не «−0,6».
+- `store.measurements(days)` → `[{kind, unit, latest, date, delta_cm, significant, since, history[]}]`.
+- `store.thigh_asymmetry()` → `{date, right, left, diff}` или `null`.
+
+### 18.3 Версия схемы
+
+`SCHEMA_VERSION = 6` (добавлены `forearm_r`, `thigh_r`, `thigh_l` в `METRIC_KINDS` и `v_daily`).

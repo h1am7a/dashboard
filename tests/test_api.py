@@ -1,9 +1,12 @@
 import os
+os.environ["DEV_MODE"] = "1"
+os.environ["DEV_USER_ID"] = "1"
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api import app
-from app import config, store, logic
+from app import store
 
 client = TestClient(app)
 
@@ -51,7 +54,7 @@ def test_sleep_periods():
     # Invalid days returns 400
     res_bad = client.get("/api/sleep?days=14")
     assert res_bad.status_code == 400
-    assert res_bad.json()["error"]["code"] == "400"
+    assert res_bad.json()["error"]["code"] == "bad_period"
 
 
 def test_body():
@@ -103,20 +106,21 @@ def test_task_done_flow():
 def test_unhandled_route_returns_501():
     res = client.get("/api/unsupported_route")
     assert res.status_code == 501
-    assert res.json()["error"]["code"] == "501"
+    assert res.json()["error"]["code"] == "not_implemented"
 
 
-def test_auth_protection_on_remote_request():
-    orig_dev = config.DEV_MODE
-    orig_user = getattr(config, "DEV_USER_ID", None)
-    config.DEV_MODE = False
-    config.DEV_USER_ID = None
+def test_auth_protection():
+    orig_dev = os.environ.get("DEV_MODE")
+    orig_user = os.environ.get("DEV_USER_ID")
+    os.environ.pop("DEV_MODE", None)
+    os.environ.pop("DEV_USER_ID", None)
 
     try:
-        remote_client = TestClient(app, base_url="https://panel.example.com")
-        res = remote_client.get("/api/today")
+        res = client.get("/api/today")
         assert res.status_code == 401
-        assert res.json()["error"]["code"] == "401"
+        assert res.json()["error"]["code"] == "no_init_data"
     finally:
-        config.DEV_MODE = orig_dev
-        config.DEV_USER_ID = orig_user
+        if orig_dev is not None:
+            os.environ["DEV_MODE"] = orig_dev
+        if orig_user is not None:
+            os.environ["DEV_USER_ID"] = orig_user

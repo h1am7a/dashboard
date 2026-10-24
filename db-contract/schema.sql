@@ -35,7 +35,7 @@ CREATE TABLE item_log(
   id INTEGER PRIMARY KEY,
   date TEXT NOT NULL,
   item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
-  item_name TEXT,                   -- denormalization: log persists even if item is deleted
+  item_name TEXT,                   -- денормализация: лог живёт даже если айтем удалён
   action TEXT NOT NULL DEFAULT 'used',   -- used / skipped / restocked
   note TEXT,
   inserted_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -47,8 +47,8 @@ CREATE TABLE items(
   brand TEXT,
   volume TEXT,
   cadence TEXT,                     -- daily / 2x_week / weekly / as_needed
-  role TEXT,                        -- routine purpose, usage instructions
-  note TEXT,                        -- formulation / usage nuances
+  role TEXT,                        -- зачем в рутине, как применять
+  note TEXT,                        -- нюансы состава/использования
   status TEXT NOT NULL DEFAULT 'active',   -- active / out / dropped
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )
@@ -63,7 +63,7 @@ CREATE TABLE journal(
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)
 CREATE TABLE metrics(
   id INTEGER PRIMARY KEY,
-  ts TEXT NOT NULL,                 -- ISO date (YYYY-MM-DD) or datetime
+  ts TEXT NOT NULL,                 -- ISO date (YYYY-MM-DD) или datetime
   kind TEXT NOT NULL,
   value REAL NOT NULL,
   unit TEXT,
@@ -78,7 +78,7 @@ CREATE TABLE tasks(
   project TEXT,
   due TEXT,
   status TEXT NOT NULL DEFAULT 'open',   -- open / done / dropped
-  priority INTEGER NOT NULL DEFAULT 3,   -- 1 highest .. 5 lowest
+  priority INTEGER NOT NULL DEFAULT 3,   -- 1 высокий .. 5 низкий
   note TEXT,
   done_at TEXT
 )

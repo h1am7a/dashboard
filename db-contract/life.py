@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""CLI for life database profile. All database writes must go through this tool.
+"""CLI для БД профиля priest. Вся запись в базу — только через него.
 
-Examples:
-  life.py metric sleep_hours 6.5 --date 2026-10-22 --note "went to bed at 2"
+Примеры:
+  life.py metric sleep_hours 6.5 --date 2026-10-22 --note "лёг в 2"
   life.py weight 78.4
   life.py workout --kind gym --min 60 --load hard
-  life.py task "Submit report" --project income --due 2026-10-30 --prio 1
+  life.py task "сдать отчёт" --project income --due 2026-10-30 --prio 1
   life.py tasks
   life.py done 3
-  life.py event 2026-11-25 "VPN renewal" --remind 1d
+  life.py event 2026-11-25 "аренда VPN" --remind 1d
   life.py tx 1500 --dir out --category food
-  life.py journal --mood 6 --energy 5 --text "good day"
+  life.py journal --mood 6 --energy 5 --text "норм день"
   life.py report --days 14
-  life.py fact city "Moscow"
+  life.py fact city "Нальчик"
   life.py get
 """
 from __future__ import annotations
@@ -48,7 +48,7 @@ def main(argv: list[str]) -> int:
                                    note=opts.get("note"), source=opts.get("source", "cli"))
             _print({"ok": True, "id": mid})
 
-        elif cmd in store.METRIC_KINDS:  # shortcut: life.py weight 78.4
+        elif cmd in store.METRIC_KINDS:  # шорткат: life.py weight 78.4
             value = rest[0]
             o = _opts(rest[1:], flags={"--date": "ts", "--note": "note", "--source": "source"})
             mid = store.add_metric(cmd, value, **o)
@@ -121,6 +121,35 @@ def main(argv: list[str]) -> int:
             o = _opts(rest, flags={"--days": "days"})
             _print(store.item_stats(int(o.get("days", 30))))
 
+        elif cmd == "habits":
+            _print(store.habits_list(include_inactive="--all" in rest))
+
+        elif cmd == "habit":
+            sub = rest[0]
+            if sub == "add":
+                o = _opts(rest[1:], flags={"--key": "key", "--title": "title",
+                                           "--rule": "rule", "--sort": "sort", "--from": "from"})
+                store.add_habit(o["key"], o["title"], json.loads(o["rule"]),
+                                active_from=o.get("from"), sort=int(o.get("sort", 100)))
+                _print({"ok": True})
+            elif sub in ("off", "rm"):
+                store.deactivate_habit(rest[1])
+                _print({"ok": True})
+            else:
+                raise ValueError("habit add | habit off <key>")
+
+        elif cmd in ("measurements", "body"):
+            _print(store.measurements(int(rest[0]) if rest else 365))
+
+        elif cmd == "asym":
+            _print(store.thigh_asymmetry())
+
+        elif cmd == "score":
+            _print(store.day_score(rest[0] if rest else None))
+
+        elif cmd == "hitmap":
+            _print(store.hitmap(int(rest[0]) if rest else 84))
+
         elif cmd == "fact":
             store.set_fact(rest[0], " ".join(rest[1:]))
             _print({"ok": True})
@@ -134,26 +163,26 @@ def main(argv: list[str]) -> int:
                         "events": store.rows(c, "SELECT date,title,status FROM events WHERE status='active' ORDER BY date"),
                         "tx": store.rows(c, "SELECT ts,amount,currency,direction,category FROM tx ORDER BY id DESC LIMIT 10")})
 
-        elif cmd == "sql":  # read-only
+        elif cmd == "sql":  # только чтение
             q = " ".join(rest)
             if not q.lstrip().lower().startswith(("select", "with")):
-                raise ValueError("sql: only SELECT/WITH queries allowed")
+                raise ValueError("sql: только SELECT/WITH")
             with store.session() as c:
                 _print(store.rows(c, q))
 
         else:
-            print(f"unknown command: {cmd}\n", file=sys.stderr)
+            print(f"неизвестная команда: {cmd}\n", file=sys.stderr)
             print(__doc__, file=sys.stderr)
             return 2
 
     except (ValueError, IndexError) as e:
-        print(f"error: {e}", file=sys.stderr)
+        print(f"ошибка: {e}", file=sys.stderr)
         return 1
     return 0
 
 
 def _opts(args: list[str], flags: dict[str, str]) -> dict:
-    """--key value / --flag (sets True-like for value-less flags)."""
+    """--key value / --flag (для --flag без значения кладёт True-подобное)."""
     out: dict = {}
     i = 0
     while i < len(args):
@@ -166,7 +195,7 @@ def _opts(args: list[str], flags: dict[str, str]) -> dict:
                 out[flags[a]] = True
                 i += 1
         else:
-            raise ValueError(f"unknown parameter: {a}")
+            raise ValueError(f"неизвестный параметр {a}")
     return out
 
 

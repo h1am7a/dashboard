@@ -28,11 +28,27 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-INSTALL_DIR="${INSTALL_DIR:-/root/priest}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/priest-panel}"
+DB_PATH="${DB_PATH:-/root/priest/db/life.db}"
 REPO_URL="https://github.com/h1am7a/dashboard.git"
 SERVICE_NAME="priest-panel"
 
-# 2. Install System Dependencies
+# Strictly guard against cloning into /root/priest
+if [ "$INSTALL_DIR" = "/root/priest" ]; then
+  echo -e "${C_RED}[!] Error: Target directory cannot be /root/priest.${C_RESET}"
+  echo -e "    Panel must be installed into /opt/priest-panel."
+  INSTALL_DIR="/opt/priest-panel"
+fi
+
+# 2. Check Existing Database
+echo -e "${C_CYAN}[*] Database location: ${DB_PATH}${C_RESET}"
+if [ -f "$DB_PATH" ]; then
+  echo -e "    ${C_GREEN}[✓] Found existing database at ${DB_PATH}${C_RESET}"
+else
+  echo -e "    ${C_YELLOW}[i] Database not present at ${DB_PATH} yet. Existing DB will be opened once available.${C_RESET}"
+fi
+
+# 3. Install System Dependencies
 echo -e "${C_CYAN}[*] Step 1/6: Installing system prerequisites...${C_RESET}"
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update -qq
@@ -43,7 +59,7 @@ elif command -v yum >/dev/null 2>&1; then
   yum install -y -q git python3 python3-pip curl
 fi
 
-# 3. Clone or Update Repo
+# 4. Clone or Update Repo
 echo -e "${C_CYAN}[*] Step 2/6: Setting up project repository in ${INSTALL_DIR}...${C_RESET}"
 mkdir -p "$(dirname "$INSTALL_DIR")"
 if [ -d "$INSTALL_DIR/.git" ]; then
@@ -56,7 +72,7 @@ fi
 
 cd "$INSTALL_DIR"
 
-# 4. Setup Python Virtual Environment
+# 5. Setup Python Virtual Environment
 echo -e "${C_CYAN}[*] Step 3/6: Setting up Python virtual environment...${C_RESET}"
 if [ ! -d "$INSTALL_DIR/.venv" ]; then
   python3 -m venv "$INSTALL_DIR/.venv"
@@ -64,7 +80,7 @@ fi
 "$INSTALL_DIR/.venv/bin/pip" install --upgrade pip -q
 "$INSTALL_DIR/.venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
 
-# 5. Configure Environment (.env)
+# 6. Configure Environment (.env)
 echo -e "${C_CYAN}[*] Step 4/6: Configuring environment variables...${C_RESET}"
 ENV_FILE="$INSTALL_DIR/.env"
 
@@ -84,7 +100,7 @@ fi
 
 if [ ! -f "$ENV_FILE" ]; then
   cat <<EOF > "$ENV_FILE"
-PRIEST_DB=db/life.db
+DB_PATH=${DB_PATH}
 BOT_TOKEN=${TOKEN_VAL}
 ALLOWED_USER_ID=${USER_ID_VAL}
 DEV_MODE=false
@@ -94,17 +110,23 @@ EOF
   chmod 600 "$ENV_FILE"
   echo "    Created ${ENV_FILE}"
 else
-  # Update existing .env if tokens were provided
+  # Update existing .env if tokens or DB_PATH were provided
   if [ -n "$TOKEN_VAL" ]; then
     sed -i "s|^BOT_TOKEN=.*|BOT_TOKEN=${TOKEN_VAL}|" "$ENV_FILE"
   fi
   if [ -n "$USER_ID_VAL" ]; then
     sed -i "s|^ALLOWED_USER_ID=.*|ALLOWED_USER_ID=${USER_ID_VAL}|" "$ENV_FILE"
   fi
+  if grep -q "^DB_PATH=" "$ENV_FILE"; then
+    sed -i "s|^DB_PATH=.*|DB_PATH=${DB_PATH}|" "$ENV_FILE"
+  else
+    echo "DB_PATH=${DB_PATH}" >> "$ENV_FILE"
+  fi
+  sed -i "/^PRIEST_DB=/d" "$ENV_FILE" 2>/dev/null || true
   echo "    Preserved existing ${ENV_FILE}"
 fi
 
-# 6. Setup Systemd Service
+# 7. Setup Systemd Service
 echo -e "${C_CYAN}[*] Step 5/6: Configuring systemd service (${SERVICE_NAME}.service)...${C_RESET}"
 SYSTEMD_UNIT="/etc/systemd/system/${SERVICE_NAME}.service"
 
@@ -130,7 +152,7 @@ systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}" -q
 systemctl restart "${SERVICE_NAME}"
 
-# 7. Verification & Health Check
+# 8. Verification & Health Check
 echo -e "${C_CYAN}[*] Step 6/6: Verifying service health...${C_RESET}"
 sleep 2
 
