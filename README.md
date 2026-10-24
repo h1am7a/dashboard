@@ -1,77 +1,99 @@
 # Priest Life — Telegram Mini App «Panel»
 
-Однопользовательская панель личной аналитики и режима для Telegram Mini App (версия 1.0 по TZ-tg-app.md).
+Single-user personal routine and lifestyle analytics dashboard for Telegram Mini App (version 1.0 specification).
 
-## Архитектура
+## Architecture
 
 ```text
-Antigravity (локально)        GitHub              Сервер /root/priest
-  frontend/  ──push──▶  репозиторий  ──pull──▶  web/dist  (статика)
+Antigravity (Local)           GitHub             Server (/root/priest)
+  frontend/  ──push──▶   Repository   ──pull──▶  web/ (static files)
                                                      │
                                                FastAPI :8099
-                                                 ├── /api/*   (JSON)
-                                                 └── /        (web/dist)
+                                                 ├── /api/*   (JSON endpoints)
+                                                 └── /        (Single Page Application)
                                                      │
-                                               cloudflared / tailscale funnel
-                                                     │
-                                               https://… → Telegram Mini App
+                                               Cloudflared / Tailscale Funnel
+                                                 │
+                                               https://... → Telegram Mini App
 ```
 
-* **Один origin:** фронтенд и API находятся на одном домене, CORS не требуется.
-* **Единый источник правды:** `app/store.py` + `db/life.db` (SQLite WAL).
-* **Только чтение + Done:** панель только отображает метрики и позволяет отмечать задачи выполненными (`POST /api/tasks/{id}/done`).
-* **Логический день:** начинается в 09:00 MSK (UTC+3) и завершается в 08:59 следующего календарного дня.
+* **Single Origin:** Frontend and API are hosted on the same origin; no CORS setup required.
+* **Single Source of Truth:** `app/store.py` + `db/life.db` (SQLite WAL mode).
+* **Read-Only + Done Action:** The dashboard displays lifestyle metrics and allows completing tasks via `POST /api/tasks/{id}/done`.
+* **Logical Day:** Begins at 09:00 MSK (UTC+3) and ends at 08:59 the following calendar day.
 
-## Экраны приложения
+## Application Views
 
 1. **Today**:
-   - Дата и день недели из кода, статус `done / total in progress`;
-   - Хитмап за 18 недель (126 дней) со шкалой 6 градаций и индикацией тренировок серыми точками;
-   - Карточка сна с дельтой к цели (`facts.wake_target`);
-   - Одно лицо настроения (шкала из 5 состояний: Bad, Meh, Ok, Good, Great);
-   - Чеклист пунктов дня (активные якоря без кнопок, задачи — с кнопкой Done).
+   - Dynamic date & weekday, progress counter (`done / total`);
+   - 18-week (126 days) activity heatmap with 6-level gradient scale and workout indicator dots;
+   - Sleep summary card with delta comparison against target (`facts.wake_target`);
+   - Single mood face (5-state scale: Bad, Meh, Ok, Good, Great);
+   - Daily checklist (active anchors without buttons; interactive actionable tasks with Done button).
 
 2. **Sleep**:
-   - Переключатель периодов: `7 Days`, `30 Days`, `90 Days`;
-   - Средний сон и дельта к предыдущему периоду (только при значимой разнице $\ge 0.5$ ч);
-   - График сна: столбики с фиксированной нижней границей 4 ч и линией цели 7.5 ч в цвете iOS Cyan (`#32ADE6`);
-   - Графики времени подъёма (цель 14:30) и засыпания (цель 08:00) со сплайн-кривыми;
-   - Интерактивные тултипы при тапе на точки и столбики.
+   - Time period selector: `7 Days`, `30 Days`, `90 Days`;
+   - Period average sleep duration and delta comparison against previous period ($\ge 0.5$ h threshold);
+   - Sleep duration chart: bars with 4h baseline and 7.5h target line in iOS Cyan (`#32ADE6`);
+   - Wake time (target 14:30) and Bedtime (target 08:00) spline charts;
+   - Tap-to-inspect interactive tooltips for data points and bars.
 
 3. **Body**:
-   - Четыре карточки замеров: талия (недельная), бицепс, предплечье, бедро (месячные) с мини-спарклайнами;
-   - Порог шума 1 см: если дельта меньше 1 см, выводится «no change»;
-   - Строка асимметрии бедра (`thigh_asymmetry`);
-   - Недельная полоса тренировок и детали выбранного дня из `note`.
+   - Four measurement cards: Waist (weekly), Biceps, Forearm, Thigh (monthly) with SVG sparklines;
+   - 1 cm noise threshold: deltas under 1 cm display as «no change»;
+   - Thigh asymmetry indicator (`thigh_asymmetry`);
+   - 7-day workout strip and selected day details (`kind`, `load`, `duration_min`, `note`).
 
-## Контракт API
+## API Contract
 
-* `GET /api/today` — данные текущего логического дня, счёт, сон, настроение, хитмап;
-* `GET /api/sleep?days=7|30|90` — статистика и непрерывная серия сна с разрывами на пропусках;
-* `GET /api/body` — 4 карточки замеров, асимметрия, тренировки за 8 недель;
-* `POST /api/tasks/{id}/done` — идемпотентное закрытие задачи;
-* `GET /api/health` — проверка доступности (`{"ok": true, "version": "1.0"}`).
+* `GET /api/today` — Current logical day data, progress counter, sleep, mood, 18-week heatmap.
+* `GET /api/sleep?days=7|30|90` — Sleep duration & schedule series with gaps preserved for missing days.
+* `GET /api/body` — 4 measurement cards, thigh asymmetry, and recent workouts.
+* `POST /api/tasks/{id}/done` — Idempotent task completion.
+* `GET /api/health` — Health check endpoint (`{"ok": true, "version": "1.0"}`).
 
-## Быстрый старт
+## Quick Install (One-Line Automated Setup)
 
-### 1. Установка зависимостей Python
+On a clean Ubuntu/Debian/RHEL server, run as root:
+
 ```bash
-pip install -r requirements.txt  # или fastapi uvicorn pytest
+curl -fsSL https://raw.githubusercontent.com/h1am7a/dashboard/main/install.sh | sudo bash
 ```
 
-### 2. Запуск сервера разработки
+Or non-interactively with pre-configured Telegram credentials:
+
+```bash
+BOT_TOKEN="your_bot_token" ALLOWED_USER_ID="your_user_id" curl -fsSL https://raw.githubusercontent.com/h1am7a/dashboard/main/install.sh | sudo -E bash
+```
+
+This automated script installs system packages, sets up `.venv`, installs dependencies, configures `.env`, and enables the `priest-panel.service` systemd daemon.
+
+## Manual Setup
+
+### 1. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Configure Environment
+```bash
+cp .env.example .env
+# Edit .env with your BOT_TOKEN and ALLOWED_USER_ID
+```
+
+### 3. Run Development Server
 ```bash
 python -m uvicorn app.api:app --host 127.0.0.1 --port 8099
 ```
-Панель будет доступна по адресу: [http://127.0.0.1:8099](http://127.0.0.1:8099).
+The panel is now accessible at [http://127.0.0.1:8099](http://127.0.0.1:8099).
 
-### 3. Тестирование
+### 4. Run Tests
 ```bash
 python -m pytest
 ```
 
-### 4. Сборка фронтенда (на сервере)
-```bash
-npm ci && npm run build
-```
-Статика компилируется в `web/dist`.
+## Service Management
+* **Status:** `sudo systemctl status priest-panel`
+* **Restart:** `sudo systemctl restart priest-panel`
+* **Logs:** `sudo journalctl -u priest-panel -f`
+* **Config:** `nano /root/priest/.env`

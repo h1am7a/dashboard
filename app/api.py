@@ -178,11 +178,11 @@ def calculate_day_score(con, day_str: str, wake_target_dec: float) -> dict:
         wake_window_ok = abs(delta_m) <= 60
 
     items = [
-        {"key": "sleep_ge_7", "title": "Сон ≥ 7 ч", "done": sleep_val is not None and sleep_val >= 7.0, "type": "habit"},
-        {"key": "wake_window", "title": "Подъём в окне ±60м", "done": wake_window_ok, "type": "habit"},
-        {"key": "workout_day", "title": "Тренировка", "done": has_wo, "type": "habit"},
-        {"key": "protein_ok", "title": "Белок в 1-м приёме", "done": protein_val == 1.0, "type": "habit"},
-        {"key": "routine_eve", "title": "Вечерняя рутина", "done": routine_val == 1.0, "type": "habit"},
+        {"key": "sleep_ge_7", "title": "Sleep ≥ 7 hrs", "done": sleep_val is not None and sleep_val >= 7.0, "type": "habit"},
+        {"key": "wake_window", "title": "Wake window ±60m", "done": wake_window_ok, "type": "habit"},
+        {"key": "workout_day", "title": "Workout session", "done": has_wo, "type": "habit"},
+        {"key": "protein_ok", "title": "Protein with 1st meal", "done": protein_val == 1.0, "type": "habit"},
+        {"key": "routine_eve", "title": "Evening routine", "done": routine_val == 1.0, "type": "habit"},
     ]
 
     for t in tasks:

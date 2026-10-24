@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""CLI для БД профиля life. Вся запись в базу — только через него.
+"""CLI for life database profile. All database writes must go through this tool.
 
-Примеры:
-  life.py metric sleep_hours 6.5 --date 2026-10-22 --note "лёг в 2"
+Examples:
+  life.py metric sleep_hours 6.5 --date 2026-10-22 --note "went to bed at 2"
   life.py weight 78.4
   life.py workout --kind gym --min 60 --load hard
-  life.py task "сдать отчёт" --project income --due 2026-10-30 --prio 1
+  life.py task "Submit report" --project income --due 2026-10-30 --prio 1
   life.py tasks
   life.py done 3
-  life.py event 2026-11-25 "аренда VPN" --remind 1d
+  life.py event 2026-11-25 "VPN renewal" --remind 1d
   life.py tx 1500 --dir out --category food
-  life.py journal --mood 6 --energy 5 --text "норм день"
+  life.py journal --mood 6 --energy 5 --text "good day"
   life.py report --days 14
   life.py fact city "Moscow"
   life.py get
@@ -48,7 +48,7 @@ def main(argv: list[str]) -> int:
                                    note=opts.get("note"), source=opts.get("source", "cli"))
             _print({"ok": True, "id": mid})
 
-        elif cmd in store.METRIC_KINDS:  # шорткат: life.py weight 78.4
+        elif cmd in store.METRIC_KINDS:  # shortcut: life.py weight 78.4
             value = rest[0]
             o = _opts(rest[1:], flags={"--date": "ts", "--note": "note", "--source": "source"})
             mid = store.add_metric(cmd, value, **o)
@@ -134,26 +134,26 @@ def main(argv: list[str]) -> int:
                         "events": store.rows(c, "SELECT date,title,status FROM events WHERE status='active' ORDER BY date"),
                         "tx": store.rows(c, "SELECT ts,amount,currency,direction,category FROM tx ORDER BY id DESC LIMIT 10")})
 
-        elif cmd == "sql":  # только чтение
+        elif cmd == "sql":  # read-only
             q = " ".join(rest)
             if not q.lstrip().lower().startswith(("select", "with")):
-                raise ValueError("sql: только SELECT/WITH")
+                raise ValueError("sql: only SELECT/WITH queries allowed")
             with store.session() as c:
                 _print(store.rows(c, q))
 
         else:
-            print(f"неизвестная команда: {cmd}\n", file=sys.stderr)
+            print(f"unknown command: {cmd}\n", file=sys.stderr)
             print(__doc__, file=sys.stderr)
             return 2
 
     except (ValueError, IndexError) as e:
-        print(f"ошибка: {e}", file=sys.stderr)
+        print(f"error: {e}", file=sys.stderr)
         return 1
     return 0
 
 
 def _opts(args: list[str], flags: dict[str, str]) -> dict:
-    """--key value / --flag (для --flag без значения кладёт True-подобное)."""
+    """--key value / --flag (sets True-like for value-less flags)."""
     out: dict = {}
     i = 0
     while i < len(args):
@@ -166,7 +166,7 @@ def _opts(args: list[str], flags: dict[str, str]) -> dict:
                 out[flags[a]] = True
                 i += 1
         else:
-            raise ValueError(f"неизвестный параметр {a}")
+            raise ValueError(f"unknown parameter: {a}")
     return out
 
 

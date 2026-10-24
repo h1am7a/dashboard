@@ -1,9 +1,10 @@
-"""Слой доступа к данным профиля priest.
+"""Data access layer for life database profile.
 
-Единая точка правды для БД: и CLI (bin/life.py), и будущее Telegram-приложение
-ходят в базу только через эти функции. Никаких ручных INSERT'ов.
+Single source of truth for the database: both CLI (bin/life.py) and
+the Telegram Mini App interface access the database exclusively through these functions.
+No raw SQL INSERTs anywhere else.
 
-Путь к БД: $PRIEST_DB или <workspace>/db/life.db
+Database path: $PRIEST_DB or <workspace>/db/life.db
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ WORKSPACE = Path(__file__).resolve().parent.parent
 SCHEMA_VERSION = 4
 
 METRIC_KINDS = {
-    # kind: (unit, допустимый диапазон или None)
+    # kind: (unit, valid range or None)
     "weight": ("kg", (30, 250)),
     "waist": ("cm", (40, 200)),
     "sleep_hours": ("h", (0, 24)),
@@ -35,8 +36,8 @@ METRIC_KINDS = {
     "protein": ("g", (0, 500)),
     "water": ("l", (0, 15)),
     "screen_time": ("h", (0, 168)),
-    "porn_count": ("раз", (0, 30)),
-    # отметки минимума дня: 0 = нет, 1 = сделано
+    "porn_count": ("count", (0, 30)),
+    # daily minimum checks: 0 = not done, 1 = completed
     "wake_light": ("0-1", (0, 1)),
     "protein_ok": ("0-1", (0, 1)),
     "routine_ok": ("0-1", (0, 1)),
@@ -47,7 +48,7 @@ CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
 
 CREATE TABLE IF NOT EXISTS metrics(
   id INTEGER PRIMARY KEY,
-  ts TEXT NOT NULL,                 -- ISO date (YYYY-MM-DD) или datetime
+  ts TEXT NOT NULL,                 -- ISO date (YYYY-MM-DD) or datetime
   kind TEXT NOT NULL,
   value REAL NOT NULL,
   unit TEXT,
@@ -75,7 +76,7 @@ CREATE TABLE IF NOT EXISTS tasks(
   project TEXT,
   due TEXT,
   status TEXT NOT NULL DEFAULT 'open',   -- open / done / dropped
-  priority INTEGER NOT NULL DEFAULT 3,   -- 1 высокий .. 5 низкий
+  priority INTEGER NOT NULL DEFAULT 3,   -- 1 highest .. 5 lowest
   note TEXT,
   done_at TEXT
 );
@@ -128,8 +129,8 @@ CREATE TABLE IF NOT EXISTS items(
   brand TEXT,
   volume TEXT,
   cadence TEXT,                     -- daily / 2x_week / weekly / as_needed
-  role TEXT,                        -- зачем в рутине, как применять
-  note TEXT,                        -- нюансы состава/использования
+  role TEXT,                        -- routine purpose, usage instructions
+  note TEXT,                        -- formulation / usage nuances
   status TEXT NOT NULL DEFAULT 'active',   -- active / out / dropped
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -139,7 +140,7 @@ CREATE TABLE IF NOT EXISTS item_log(
   id INTEGER PRIMARY KEY,
   date TEXT NOT NULL,
   item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
-  item_name TEXT,                   -- денормализация: лог живёт даже если айтем удалён
+  item_name TEXT,                   -- denormalization: log persists even if item is deleted
   action TEXT NOT NULL DEFAULT 'used',   -- used / skipped / restocked
   note TEXT,
   inserted_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -148,8 +149,7 @@ CREATE INDEX IF NOT EXISTS ix_item_log_date ON item_log(date, item_id);
 
 """
 
-# Представления пересоздаются на каждом migrate() — это дешево и избавляет
-# от ручных миграций при изменении состава колонок.
+# Views are recreated upon each migrate() call
 DAILY_VIEW = """
 CREATE VIEW v_daily AS
 SELECT d.day,
@@ -214,21 +214,21 @@ def migrate(con: sqlite3.Connection) -> None:
         )
 
 
-# ---------- утилиты валидации ----------
+# ---------- validation utilities ----------
 def _today() -> str:
     return date.today().isoformat()
 
 
 def _norm_date(value: str | None) -> str:
-    if not value or value in ("today", "сегодня"):
+    if not value or value in ("today",):
         return _today()
     s = value.strip()
-    if s in ("yesterday", "вчера"):
+    if s in ("yesterday",):
         return (date.today() - timedelta(days=1)).isoformat()
     try:
         datetime.fromisoformat(s)
     except ValueError:
-        raise ValueError(f"дата '{value}' не парсится, нужен ISO: YYYY-MM-DD или YYYY-MM-DDTHH:MM")
+        raise ValueError(f"cannot parse date '{value}', ISO format required: YYYY-MM-DD or YYYY-MM-DDTHH:MM")
     return s
 
 
@@ -237,15 +237,15 @@ def _check_metric(kind: str, value: float, unit: str | None) -> tuple[float, str
     try:
         value = float(str(value).replace(",", "."))
     except ValueError:
-        raise ValueError(f"значение '{value}' не число")
+        raise ValueError(f"value '{value}' is not a number")
     unit = unit or (METRIC_KINDS.get(kind) or (None, None))[0]
     rng = (METRIC_KINDS.get(kind) or (None, None))[1]
     if rng and not (rng[0] <= value <= rng[1]):
-        raise ValueError(f"{kind}={value} вне правдоподобного диапазона {rng[0]}..{rng[1]} — проверь единицы")
+        raise ValueError(f"{kind}={value} is outside valid range {rng[0]}..{rng[1]} — check units")
     return value, unit
 
 
-# ---------- запись ----------
+# ---------- write methods ----------
 def add_metric(kind, value, ts=None, unit=None, note=None, source="chat", con=None) -> int:
     value, unit = _check_metric(kind, value, unit)
     ts = _norm_date(ts)
@@ -262,7 +262,7 @@ def add_workout(date_=None, kind=None, duration_min=None, load=None, note=None) 
     if duration_min is not None:
         duration_min = int(duration_min)
         if not 0 < duration_min <= 600:
-            raise ValueError("duration_min должен быть 1..600 минут")
+            raise ValueError("duration_min must be 1..600 minutes")
     if load and load not in ("easy", "moderate", "hard"):
         raise ValueError("load: easy / moderate / hard")
     with session() as c:
@@ -274,7 +274,7 @@ def add_workout(date_=None, kind=None, duration_min=None, load=None, note=None) 
 
 def add_task(title, project=None, due=None, priority=3, note=None) -> int:
     if not title or not title.strip():
-        raise ValueError("task: пустой title")
+        raise ValueError("task: empty title")
     priority = int(priority)
     if not 1 <= priority <= 5:
         raise ValueError("priority 1..5")
@@ -294,12 +294,12 @@ def close_task(task_id: int, status="done") -> None:
             (status, int(task_id)),
         )
         if cur.rowcount == 0:
-            raise ValueError(f"открытая задача id={task_id} не найдена")
+            raise ValueError(f"open task with id={task_id} not found")
 
 
 def add_event(date_, title, type_=None, remind=None, note=None) -> int:
     if not title:
-        raise ValueError("event: пустой title")
+        raise ValueError("event: empty title")
     with session() as c:
         return c.execute(
             "INSERT INTO events(date,title,type,remind,note) VALUES(?,?,?,?,?)",
@@ -318,7 +318,7 @@ def add_journal(date_=None, mood=None, energy=None, text=None) -> int:
 def add_tx(amount, direction="out", ts=None, currency="RUB", category=None, account=None, note=None) -> int:
     amount = float(str(amount).replace(",", "."))
     if amount <= 0:
-        raise ValueError("amount должен быть > 0, направление задаётся direction")
+        raise ValueError("amount must be > 0, direction is specified via direction param")
     if direction not in ("in", "out"):
         raise ValueError("direction: in / out")
     with session() as c:
@@ -328,7 +328,7 @@ def add_tx(amount, direction="out", ts=None, currency="RUB", category=None, acco
         ).lastrowid
 
 
-# ---------- инвентарь и рутины ----------
+# ---------- inventory and routines ----------
 ITEM_CADENCES = ("daily", "daily_2x", "2x_week", "weekly", "as_needed")
 ITEM_ACTIONS = ("used", "skipped", "restocked")
 
@@ -336,7 +336,7 @@ ITEM_ACTIONS = ("used", "skipped", "restocked")
 def add_item(name, category=None, brand=None, volume=None, cadence=None,
              role=None, note=None, status="active") -> int:
     if not name or not name.strip():
-        raise ValueError("item: пустое name")
+        raise ValueError("item: empty name")
     if cadence and cadence not in ITEM_CADENCES:
         raise ValueError(f"cadence: {' / '.join(ITEM_CADENCES)}")
     if status not in ("active", "out", "dropped"):
@@ -365,9 +365,9 @@ def _find_item(con, needle: str) -> sqlite3.Row:
     if len(found) == 1:
         return found[0]
     if not found:
-        raise ValueError(f"не нашёл средство '{needle}' — проверь команду items")
+        raise ValueError(f"item '{needle}' not found — check items list")
     names = ", ".join(r["name"] for r in found)
-    raise ValueError(f"под '{needle}' подходит несколько: {names} — уточни")
+    raise ValueError(f"multiple items match '{needle}': {names} — please clarify")
 
 
 def log_item(name, action="used", date_=None, note=None) -> int:
@@ -416,7 +416,7 @@ def set_fact(key, value) -> None:
         )
 
 
-# ---------- чтение ----------
+# ---------- read methods ----------
 def rows(con: sqlite3.Connection, sql: str, params=()) -> list[dict]:
     return [dict(r) for r in con.execute(sql, params)]
 

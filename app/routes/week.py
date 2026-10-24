@@ -13,10 +13,10 @@ def get_week_data(
     offset: int = Query(0, ge=0, le=52),
     user: dict = Depends(auth.get_current_user),
 ):
-    """Данные для экрана 'Неделя'.
+    """Data for Week view.
     
-    offset=0: скользящие 7 дней до сегодняшнего логического дня.
-    offset>0: смещение назад на offset недель (7 * offset дней).
+    offset=0: rolling 7 days up to current logical day.
+    offset>0: shifted back by offset weeks (7 * offset days).
     """
     logical_today = logic.get_logical_day()
     anchor_date = date.fromisoformat(logical_today) - timedelta(days=offset * 7)
@@ -26,7 +26,7 @@ def get_week_data(
     prev_start = start_date - timedelta(days=7)
 
     with store.session() as con:
-        # Строки текущей недели
+        # Rows for current week window
         rows_current = store.rows(
             con,
             "SELECT * FROM v_daily WHERE day>=? AND day<=? ORDER BY day DESC",
@@ -34,14 +34,14 @@ def get_week_data(
         )
         curr_map = {r["day"][:10]: r for r in rows_current}
 
-        # Строки предыдущей недели для расчёта дельт
+        # Rows for previous week window for delta calculations
         rows_prev = store.rows(
             con,
             "SELECT * FROM v_daily WHERE day>=? AND day<=? ORDER BY day DESC",
             (prev_start.isoformat(), prev_anchor.isoformat()),
         )
         
-        # Собираем 7 строк таблицы (от anchor назад к start)
+        # Assemble 7 rows of table (from anchor backwards to start)
         days_table = []
         c = anchor_date
         has_data_count = 0
@@ -52,7 +52,7 @@ def get_week_data(
                 has_data_count += 1
                 days_table.append({
                     "day": iso_d,
-                    "date_ru": logic.format_date_ru(iso_d),
+                    "date_formatted": logic.format_date_en(iso_d),
                     "is_today": (iso_d == logical_today),
                     "wake_time": logic.decimal_to_time_str(d_row.get("wake_time")),
                     "bed_time": logic.decimal_to_time_str(d_row.get("bed_time")),
@@ -64,7 +64,7 @@ def get_week_data(
             else:
                 days_table.append({
                     "day": iso_d,
-                    "date_ru": logic.format_date_ru(iso_d),
+                    "date_formatted": logic.format_date_en(iso_d),
                     "is_today": (iso_d == logical_today),
                     "wake_time": "—",
                     "bed_time": "—",
@@ -75,20 +75,19 @@ def get_week_data(
                 })
             c -= timedelta(days=1)
 
-        # Дельты: Сон (среднее)
+        # Deltas: Sleep (average)
         curr_sleep_vals = [r["sleep_hours"] for r in rows_current if r.get("sleep_hours") is not None]
         prev_sleep_vals = [r["sleep_hours"] for r in rows_prev if r.get("sleep_hours") is not None]
         curr_sleep_avg = round(sum(curr_sleep_vals) / len(curr_sleep_vals), 1) if curr_sleep_vals else None
         prev_sleep_avg = round(sum(prev_sleep_vals) / len(prev_sleep_vals), 1) if prev_sleep_vals else None
         sleep_delta = round(curr_sleep_avg - prev_sleep_avg, 1) if (curr_sleep_avg and prev_sleep_avg) else None
 
-        # Дельты: Тренировки (число дней с тренировками)
+        # Deltas: Workouts (count of days with workouts)
         curr_wo_count = sum(1 for r in rows_current if r.get("workout_count", 0) > 0)
         prev_wo_count = sum(1 for r in rows_prev if r.get("workout_count", 0) > 0)
         wo_delta = curr_wo_count - prev_wo_count
 
-        # Дельты: Экран
-        # Ищем запись screen_time в окнах
+        # Deltas: Screen time
         curr_screen_row = con.execute(
             "SELECT value FROM metrics WHERE kind='screen_time' AND ts>=? AND ts<=? ORDER BY ts DESC LIMIT 1",
             (start_date.isoformat(), anchor_date.isoformat()),
@@ -102,7 +101,7 @@ def get_week_data(
         prev_screen = float(prev_screen_row["value"]) if prev_screen_row else None
         screen_delta = round(curr_screen - prev_screen, 1) if (curr_screen and prev_screen) else None
 
-    range_title = f"{logic.format_date_ru(start_date.isoformat())} – {logic.format_date_ru(anchor_date.isoformat())}"
+    range_title = f"{logic.format_date_en(start_date.isoformat())} – {logic.format_date_en(anchor_date.isoformat())}"
 
     return {
         "range_title": range_title,
@@ -114,7 +113,7 @@ def get_week_data(
                 "curr": curr_sleep_avg,
                 "prev": prev_sleep_avg,
                 "delta": sleep_delta,
-                "label": f"{prev_sleep_avg or '—'} → {curr_sleep_avg or '—'} ({'+' if sleep_delta and sleep_delta > 0 else ''}{sleep_delta or '—'} ч)"
+                "label": f"{prev_sleep_avg or '—'} → {curr_sleep_avg or '—'} ({'+' if sleep_delta and sleep_delta > 0 else ''}{sleep_delta or '—'} h)"
             },
             "workouts": {
                 "curr": curr_wo_count,

@@ -19,13 +19,13 @@ class TaskCreate(BaseModel):
 
 @router.get("")
 def get_tasks_screen(user: dict = Depends(auth.get_current_user)):
-    """Данные для экрана 'Дела'."""
+    """Data for Tasks view."""
     logical_today = logic.get_logical_day()
     curr_d = date.fromisoformat(logical_today)
     d7_ago = (curr_d - timedelta(days=7)).isoformat()
 
     with store.session() as con:
-        # 1. Открытые дела
+        # 1. Open tasks
         open_tasks = store.rows(
             con,
             "SELECT id, title, project, due, priority, status, created FROM tasks "
@@ -39,13 +39,13 @@ def get_tasks_screen(user: dict = Depends(auth.get_current_user)):
             if due_str:
                 try:
                     d_obj = date.fromisoformat(due_str[:10])
-                    due_label = f"до {logic.format_date_ru(due_str)}"
+                    due_label = f"due {logic.format_date_en(due_str)}"
                     if d_obj < curr_d:
                         is_overdue = True
                         diff = (curr_d - d_obj).days
-                        due_label = f"просрочен на {diff} д"
+                        due_label = f"overdue by {diff}d"
                 except Exception:
-                    due_label = f"до {due_str}"
+                    due_label = f"due {due_str}"
 
             formatted_open.append({
                 "id": t["id"],
@@ -57,7 +57,7 @@ def get_tasks_screen(user: dict = Depends(auth.get_current_user)):
                 "priority": t["priority"],
             })
 
-        # 2. Выполненные за 7 дней
+        # 2. Completed in last 7 days
         done_rows = store.rows(
             con,
             "SELECT id, title, project, done_at FROM tasks "
@@ -69,10 +69,10 @@ def get_tasks_screen(user: dict = Depends(auth.get_current_user)):
             "title": r["title"],
             "project": r["project"],
             "done_at": r["done_at"],
-            "date_ru": logic.format_date_ru(r["done_at"][:10]) if r.get("done_at") else "",
+            "date_formatted": logic.format_date_en(r["done_at"][:10]) if r.get("done_at") else "",
         } for r in done_rows]
 
-        # 3. Ближайшие 5 событий
+        # 3. Upcoming 5 events
         event_rows = store.rows(
             con,
             "SELECT id, date, title, type, remind FROM events "
@@ -82,7 +82,7 @@ def get_tasks_screen(user: dict = Depends(auth.get_current_user)):
         formatted_events = [{
             "id": e["id"],
             "date": e["date"],
-            "date_ru": logic.format_date_ru(e["date"]),
+            "date_formatted": logic.format_date_en(e["date"]),
             "title": e["title"],
             "type": e["type"],
             "remind": e["remind"],
@@ -98,7 +98,7 @@ def get_tasks_screen(user: dict = Depends(auth.get_current_user)):
 
 @router.post("")
 def create_task(payload: TaskCreate, user: dict = Depends(auth.get_current_user)):
-    """Создание новой задачи через store.add_task."""
+    """Create new task via store.add_task."""
     try:
         new_id = store.add_task(
             title=payload.title,
@@ -114,7 +114,7 @@ def create_task(payload: TaskCreate, user: dict = Depends(auth.get_current_user)
 
 @router.post("/{task_id}/done")
 def complete_task(task_id: int, user: dict = Depends(auth.get_current_user)):
-    """Отметка задачи выполненной через store.close_task."""
+    """Mark task as done via store.close_task."""
     try:
         store.close_task(task_id, status="done")
         return {"ok": True, "closed_id": task_id}

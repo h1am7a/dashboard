@@ -6,22 +6,22 @@ from app import config
 
 MSK_TZ = timezone(timedelta(hours=config.TIMEZONE_OFFSET_HOURS))
 
-MONTH_NAMES_RU = [
-    "", "янв", "фев", "мар", "апр", "май", "июн",
-    "июл", "авг", "сен", "окт", "ноя", "дек"
+MONTH_NAMES_EN = [
+    "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 ]
 
 
 def get_msk_now() -> datetime:
-    """Текущее время в часовом поясе MSK (UTC+3)."""
+    """Current time in MSK timezone (UTC+3)."""
     return datetime.now(timezone.utc).astimezone(MSK_TZ)
 
 
 def get_logical_day(dt: datetime | None = None) -> str:
-    """Вычисляет дату логического дня с границей в 09:00 MSK.
+    """Calculate logical day date with 09:00 MSK threshold.
     
-    Всё, что происходит с 09:00 до 08:59 следующего календарного дня,
-    относится к дате начала.
+    Everything occurring between 09:00 and 08:59 of the next calendar day
+    belongs to the starting date.
     """
     now = dt or get_msk_now()
     if now.hour < 9:
@@ -32,7 +32,7 @@ def get_logical_day(dt: datetime | None = None) -> str:
 
 
 def decimal_to_time_str(val: float | None) -> str:
-    """Конвертирует десятичные часы (15.5) в строку времени (15:30)."""
+    """Convert decimal hours (15.5) to formatted time string (15:30)."""
     if val is None:
         return "—"
     hours = int(val) % 24
@@ -44,18 +44,18 @@ def decimal_to_time_str(val: float | None) -> str:
 
 
 def time_str_to_decimal(time_str: str) -> float:
-    """Конвертирует '15:30' в 15.5."""
+    """Convert '15:30' to 15.5."""
     parts = time_str.strip().split(":")
     hours = int(parts[0])
     minutes = int(parts[1]) if len(parts) > 1 else 0
     return round(hours + minutes / 60.0, 2)
 
 
-def format_date_ru(iso_day: str, with_year: bool = False) -> str:
-    """Форматирует '2026-10-23' -> '23 окт'."""
+def format_date_en(iso_day: str, with_year: bool = False) -> str:
+    """Format '2026-10-23' -> '23 Oct'."""
     try:
         d = date.fromisoformat(iso_day[:10])
-        month = MONTH_NAMES_RU[d.month]
+        month = MONTH_NAMES_EN[d.month]
         if with_year:
             return f"{d.day} {month} {d.year}"
         return f"{d.day} {month}"
@@ -63,19 +63,21 @@ def format_date_ru(iso_day: str, with_year: bool = False) -> str:
         return iso_day
 
 
+format_date_ru = format_date_en
+
+
 def compute_phase_drift(wake_points: list[tuple[str, float]]) -> dict:
-    """Вычисляет дрейф фазы сна по методу наименьших квадратов (МНК).
+    """Compute sleep phase drift using Ordinary Least Squares (OLS).
     
-    wake_points: список [(day_iso, wake_time_decimal), ...] отсортированный по дате.
-    Значения < 09:00 сдвигаются на +24, чтобы не разрываться через полночь.
+    wake_points: list of [(day_iso, wake_time_decimal), ...] sorted chronologically.
+    Values < 09:00 are shifted by +24 to avoid midnight discontinuities.
     """
     if len(wake_points) < 4:
-        return {"drift_min_day": None, "label": "мало данных", "points_count": len(wake_points)}
+        return {"drift_min_day": None, "label": "insufficient data", "points_count": len(wake_points)}
 
-    # Берём максимум последние 7 точек
+    # Use up to the last 7 points
     recent = wake_points[-7:]
     
-    # Преобразуем точки в (x_day_index, y_adjusted_hours)
     first_date = date.fromisoformat(recent[0][0])
     xs: list[float] = []
     ys: list[float] = []
@@ -95,7 +97,7 @@ def compute_phase_drift(wake_points: list[tuple[str, float]]) -> dict:
     
     denom = sum((x - mean_x) ** 2 for x in xs)
     if denom == 0:
-        return {"drift_min_day": 0, "label": "0 мин/день", "points_count": n}
+        return {"drift_min_day": 0, "label": "0 min/day", "points_count": n}
 
     slope = sum((xs[i] - mean_x) * (ys[i] - mean_y) for i in range(n)) / denom
     drift_min_day = int(round(slope * 60))
@@ -103,18 +105,17 @@ def compute_phase_drift(wake_points: list[tuple[str, float]]) -> dict:
     sign = "+" if drift_min_day > 0 else ""
     return {
         "drift_min_day": drift_min_day,
-        "label": f"{sign}{drift_min_day} мин/день",
+        "label": f"{sign}{drift_min_day} min/day",
         "points_count": n,
         "is_anomaly": abs(drift_min_day) > 60
     }
 
 
 def get_screen_time_ring(con: sqlite3.Connection, current_day: str) -> dict:
-    """Возвращает данные для кольца скринтайма на экране 'Сегодня'.
+    """Return data for screen time progress ring on Today view.
     
-    Показывает последнюю завершённую неделю с диапазоном дат под кольцом (например, 13–19 окт).
+    Displays the latest completed week with date range (e.g., 13–19 Oct).
     """
-    # Ищем последнюю запись screen_time
     cur = con.execute(
         "SELECT ts, value FROM metrics WHERE kind='screen_time' ORDER BY ts DESC, id DESC LIMIT 1"
     )
@@ -124,7 +125,7 @@ def get_screen_time_ring(con: sqlite3.Connection, current_day: str) -> dict:
             "hours": 0.0,
             "target": 50.0,
             "percent": 0,
-            "range_label": "скринтайм ещё не вносился",
+            "range_label": "screen time not logged yet",
             "is_empty": True,
             "is_over": False,
         }
@@ -134,14 +135,12 @@ def get_screen_time_ring(con: sqlite3.Connection, current_day: str) -> dict:
     percent = int(min(round((hours / target) * 100), 100)) if target > 0 else 0
     is_over = hours > target
 
-    # Вычисляем диапазон недели для записи
-    # Запись обычно вносится в воскресенье за предшествующие 7 дней (пн-вс)
     try:
         rec_date = date.fromisoformat(row["ts"][:10])
         start_date = rec_date - timedelta(days=6)
-        range_label = f"{format_date_ru(start_date.isoformat())} – {format_date_ru(rec_date.isoformat())}"
+        range_label = f"{format_date_en(start_date.isoformat())} – {format_date_en(rec_date.isoformat())}"
     except Exception:
-        range_label = f"запись от {row['ts']}"
+        range_label = f"logged {row['ts']}"
 
     return {
         "hours": round(hours, 1),
@@ -155,20 +154,20 @@ def get_screen_time_ring(con: sqlite3.Connection, current_day: str) -> dict:
 
 
 def compute_insight(con: sqlite3.Connection, current_day: str) -> str | None:
-    """Проверяет правила инсайта строго по порядку (п. 13.9).
+    """Evaluate insight rules in strict priority order (Section 13.9).
     
-    Возвращает первую сработавшую фразу или None.
+    Returns the first matching insight string or None.
     """
-    # 1. Нет записей 3+ дня
+    # 1. No entries for 3+ days
     latest_metric = con.execute("SELECT MAX(ts) as max_ts FROM metrics").fetchone()
     if latest_metric and latest_metric["max_ts"]:
         max_d = date.fromisoformat(latest_metric["max_ts"][:10])
         curr_d = date.fromisoformat(current_day[:10])
         diff_days = (curr_d - max_d).days
         if diff_days >= 3:
-            return f"{diff_days} дня без записей" if diff_days < 5 else f"{diff_days} дней без записей"
+            return f"{diff_days} days without logs"
 
-    # 2. Дрейф подъёма за 3 дня > 45 мин
+    # 2. Wake drift over 3 days > 45 min
     wake_rows = con.execute(
         "SELECT ts, value FROM metrics WHERE kind='wake_time' ORDER BY ts DESC LIMIT 3"
     ).fetchall()
@@ -184,9 +183,9 @@ def compute_insight(con: sqlite3.Connection, current_day: str) -> str | None:
         if diff_minutes > 45:
             hh = diff_minutes // 60
             mm = diff_minutes % 60
-            return f"подъём сдвинулся на +{hh}:{mm:02d} за 3 дня"
+            return f"wake time shifted by +{hh}:{mm:02d} over 3 days"
 
-    # 3 & 4. Экран за неделю
+    # 3 & 4. Screen time for week
     screen_rows = con.execute(
         "SELECT ts, value FROM metrics WHERE kind='screen_time' ORDER BY ts DESC LIMIT 2"
     ).fetchall()
@@ -194,29 +193,29 @@ def compute_insight(con: sqlite3.Connection, current_day: str) -> str | None:
         latest_screen = screen_rows[0]["value"]
         if latest_screen > 50:
             over = int(round(latest_screen - 50))
-            return f"экран {int(latest_screen)} ч — на {over} ч выше цели"
+            return f"screen time {int(latest_screen)}h — {over}h above target"
         if len(screen_rows) >= 2:
             prev_screen = screen_rows[1]["value"]
             if (prev_screen - latest_screen) >= 5:
                 delta = int(round(prev_screen - latest_screen))
-                return f"экран {int(latest_screen)} ч — на {delta} ч меньше прошлой недели"
+                return f"screen time {int(latest_screen)}h — {delta}h below last week"
 
-    # 5. Нет тренировок 5+ дней
+    # 5. No workouts for 5+ days
     latest_wo = con.execute("SELECT MAX(date) as max_d FROM workouts").fetchone()
     if latest_wo and latest_wo["max_d"]:
         wo_d = date.fromisoformat(latest_wo["max_d"][:10])
         curr_d = date.fromisoformat(current_day[:10])
         wo_gap = (curr_d - wo_d).days
         if wo_gap >= 5:
-            return f"{wo_gap} дней без тренировок"
+            return f"{wo_gap} days without workouts"
 
-    # 6. Среднее настроение за 3 дня < 4
+    # 6. Average mood for 3 days < 4
     mood_rows = con.execute(
         "SELECT AVG(value) as avg_mood, COUNT(*) as cnt FROM metrics "
         "WHERE kind='mood' AND ts >= date(?, '-2 days')",
         (current_day,)
     ).fetchone()
     if mood_rows and mood_rows["cnt"] >= 2 and mood_rows["avg_mood"] and mood_rows["avg_mood"] < 4.0:
-        return "настроение ниже обычного 3 дня"
+        return "mood lower than usual for 3 days"
 
     return None

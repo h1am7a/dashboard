@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api", tags=["summary"])
 
 
 def _get_sparkline(con: sqlite3.Connection, kind: str, days: int = 14) -> list[float | None]:
-    """Возвращает точки спарклайна за последние N дней."""
+    """Return sparkline points for the last N days."""
     logical_today = logic.get_logical_day()
     start_d = (date.fromisoformat(logical_today) - timedelta(days=days - 1)).isoformat()
     
@@ -45,26 +45,26 @@ def health_check():
 
 @router.get("/summary")
 def get_summary(user: dict = Depends(auth.get_current_user)):
-    """Полная сводка для экрана 'Сегодня'."""
+    """Complete summary for Today view."""
     logical_today = logic.get_logical_day()
     curr_date = date.fromisoformat(logical_today)
     date_7d_ago = (curr_date - timedelta(days=6)).isoformat()
     date_14d_ago = (curr_date - timedelta(days=13)).isoformat()
 
     with store.session() as con:
-        # Инсайт
+        # Insight calculation
         insight = logic.compute_insight(con, logical_today)
 
-        # Кольцо скринтайма
+        # Screen time progress ring
         screen_ring = logic.get_screen_time_ring(con, logical_today)
 
-        # Сегодняшняя строка из v_daily
+        # Today's row from v_daily
         daily_today = con.execute(
             "SELECT * FROM v_daily WHERE day=?", (logical_today,)
         ).fetchone()
         today_data = dict(daily_today) if daily_today else {}
 
-        # 1. Сон
+        # 1. Sleep
         sleep_hours = today_data.get("sleep_hours")
         wake_time = today_data.get("wake_time")
         wake_time_str = logic.decimal_to_time_str(wake_time)
@@ -74,9 +74,9 @@ def get_summary(user: dict = Depends(auth.get_current_user)):
         ).fetchone()[0]
         sleep_spark = _get_sparkline(con, "sleep_hours", 14)
 
-        # 2. Настроение
+        # 2. Mood
         mood_val = today_data.get("mood")
-        # дельта к прошлой неделе
+        # delta compared to previous week
         mood_this_week = con.execute(
             "SELECT AVG(value) FROM metrics WHERE kind='mood' AND ts>=?",
             (date_7d_ago,),
@@ -92,7 +92,7 @@ def get_summary(user: dict = Depends(auth.get_current_user)):
         )
         mood_spark = _get_sparkline(con, "mood", 14)
 
-        # 3. Фап (порно)
+        # 3. Masturbation counter
         porn_today = today_data.get("porn_count", 0) or 0
         porn_avg_7d = con.execute(
             "SELECT ROUND(AVG(value), 1) FROM metrics WHERE kind='porn_count' AND ts>=?",
@@ -100,7 +100,7 @@ def get_summary(user: dict = Depends(auth.get_current_user)):
         ).fetchone()[0]
         porn_spark = _get_sparkline(con, "porn_count", 14)
 
-        # 4. Тренировки за 7 дней
+        # 4. Workouts over 7 days
         wo_count_7d = con.execute(
             "SELECT COUNT(*) FROM workouts WHERE date>=?", (date_7d_ago,)
         ).fetchone()[0]
@@ -111,13 +111,13 @@ def get_summary(user: dict = Depends(auth.get_current_user)):
             wo_d = date.fromisoformat(last_wo["date"][:10])
             days_ago = (curr_date - wo_d).days
             days_ago_label = (
-                "сегодня" if days_ago == 0 else f"{days_ago} д назад"
+                "today" if days_ago == 0 else f"{days_ago}d ago"
             )
-            last_wo_label = f"{last_wo['kind'] or 'тренировка'} · {days_ago_label}"
+            last_wo_label = f"{last_wo['kind'] or 'workout'} · {days_ago_label}"
         else:
-            last_wo_label = "пока нет записей"
+            last_wo_label = "no logs yet"
 
-        # Спарклайн тренировок (минуты)
+        # Workout sparkline (minutes)
         wo_rows = store.rows(
             con,
             "SELECT date, SUM(duration_min) as m FROM workouts WHERE date>=? GROUP BY date",
@@ -130,26 +130,26 @@ def get_summary(user: dict = Depends(auth.get_current_user)):
             wo_spark.append(wo_map.get(c.isoformat(), 0))
             c += timedelta(days=1)
 
-        # Минимум дня (wake_light, protein_ok, routine_ok)
+        # Daily minimum checks (wake_light, protein_ok, routine_ok)
         wake_light = int(today_data.get("wake_light") or 0)
         protein_ok = int(today_data.get("protein_ok") or 0)
         routine_ok = int(today_data.get("routine_ok") or 0)
 
-        # Следующий шаг (задача с минимальным priority)
+        # Next step (open task with highest priority)
         task_row = con.execute(
             "SELECT id, title, project, due, priority FROM tasks WHERE status='open' "
             "ORDER BY priority ASC, COALESCE(due, '9999') ASC, id ASC LIMIT 1"
         ).fetchone()
         next_task = dict(task_row) if task_row else None
 
-        # Хитмап на 90 дней (12-13 недель)
+        # 90-day heatmap (12-13 weeks)
         date_90d_ago = (curr_date - timedelta(days=89)).isoformat()
         daily_90d = store.rows(
             con, "SELECT * FROM v_daily WHERE day>=? ORDER BY day ASC", (date_90d_ago,)
         )
         daily_map = {r["day"][:10]: r for r in daily_90d}
 
-        # Цель подъема
+        # Wake target fact
         target_fact = con.execute("SELECT value FROM facts WHERE key='wake_target'").fetchone()
         wake_target = (
             logic.time_str_to_decimal(target_fact["value"]) if target_fact else 14.5
@@ -188,7 +188,7 @@ def get_summary(user: dict = Depends(auth.get_current_user)):
 
     return {
         "logical_day": logical_today,
-        "logical_day_title": logic.format_date_ru(logical_today, with_year=False),
+        "logical_day_title": logic.format_date_en(logical_today, with_year=False),
         "server_time_msk": logic.get_msk_now().isoformat(),
         "insight": insight,
         "screen_ring": screen_ring,

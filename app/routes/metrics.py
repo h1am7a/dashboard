@@ -30,7 +30,7 @@ class MinimumToggle(BaseModel):
 
 @router.post("/metrics")
 def add_metric_api(payload: MetricCreate, user: dict = Depends(auth.get_current_user)):
-    """Добавление метрики через store.add_metric."""
+    """Add metric via store.add_metric."""
     target_ts = payload.date or logic.get_logical_day()
     try:
         new_id = store.add_metric(
@@ -48,7 +48,7 @@ def add_metric_api(payload: MetricCreate, user: dict = Depends(auth.get_current_
 
 @router.post("/workouts")
 def add_workout_api(payload: WorkoutCreate, user: dict = Depends(auth.get_current_user)):
-    """Добавление тренировки через store.add_workout."""
+    """Add workout via store.add_workout."""
     target_date = payload.date or logic.get_logical_day()
     try:
         new_id = store.add_workout(
@@ -65,12 +65,11 @@ def add_workout_api(payload: WorkoutCreate, user: dict = Depends(auth.get_curren
 
 @router.post("/minimum/toggle")
 def toggle_minimum_metric(payload: MinimumToggle, user: dict = Depends(auth.get_current_user)):
-    """Тоггл одной из отметок минимума дня (wake_light, protein_ok, routine_ok) за текущий логический день."""
+    """Toggle a daily minimum check (wake_light, protein_ok, routine_ok) for the current logical day."""
     logical_today = logic.get_logical_day()
     kind = payload.metric_kind
 
     with store.session() as con:
-        # Узнаем текущее значение за сегодня
         cur = con.execute(
             "SELECT value FROM metrics WHERE kind=? AND ts=? ORDER BY id DESC LIMIT 1",
             (kind, logical_today),
@@ -79,13 +78,12 @@ def toggle_minimum_metric(payload: MinimumToggle, user: dict = Depends(auth.get_
         curr_val = int(row["value"]) if row else 0
         new_val = 0 if curr_val == 1 else 1
 
-    # Записываем через store.add_metric
     store.add_metric(
         kind=kind,
         value=new_val,
         ts=logical_today,
         unit="0-1",
-        note="минимум дня",
+        note="daily minimum",
         source="webapp",
     )
 

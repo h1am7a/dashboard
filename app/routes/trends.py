@@ -8,14 +8,14 @@ from app import auth, logic, store
 router = APIRouter(prefix="/api", tags=["trends"])
 
 ALLOWED_TREND_KINDS = {
-    "sleep_hours": "Сон (ч)",
-    "wake_time": "Подъём (фаза)",
-    "bed_time": "Отбой",
-    "mood": "Настроение",
-    "screen_time": "Экран (ч)",
-    "porn_count": "Фап (раз)",
-    "waist": "Обхват живота (см)",
-    "weight": "Вес (кг)",
+    "sleep_hours": "Sleep (hrs)",
+    "wake_time": "Wake Time (phase)",
+    "bed_time": "Bedtime",
+    "mood": "Mood",
+    "screen_time": "Screen Time (hrs)",
+    "porn_count": "Masturbation (count)",
+    "waist": "Waist Circumference (cm)",
+    "weight": "Weight (kg)",
 }
 
 
@@ -25,10 +25,10 @@ def get_trends(
     days: int = Query(30, ge=7, le=180),
     user: dict = Depends(auth.get_current_user),
 ):
-    """Данные для экрана 'Тренды'."""
+    """Data for Trends view."""
     kind = kind.strip().lower()
     if kind not in store.METRIC_KINDS:
-        raise HTTPException(status_code=404, detail=f"Метрика '{kind}' не найдена")
+        raise HTTPException(status_code=404, detail=f"Metric '{kind}' not found")
 
     logical_today = logic.get_logical_day()
     curr_d = date.fromisoformat(logical_today)
@@ -43,7 +43,7 @@ def get_trends(
             (kind, start_d.isoformat()),
         )
 
-    # Дедупликация: если в один день несколько записей, берем последнюю
+    # Deduplication: if multiple records exist for the same day, take the latest
     point_map: dict[str, dict] = {}
     for r in rows:
         day_key = r["ts"][:10]
@@ -56,10 +56,10 @@ def get_trends(
     sorted_days = sorted(point_map.keys())
     points_data = [point_map[k] for k in sorted_days]
 
-    # Проверка на разрыв линии (> 2 дней между точками)
+    # Line break detection (> 2 days gap between points)
     formatted_points = []
     is_time_metric = kind in ("wake_time", "bed_time")
-    
+
     prev_date: date | None = None
     for p in points_data:
         p_date = date.fromisoformat(p["day"])
@@ -70,14 +70,14 @@ def get_trends(
                 is_break = True
 
         val = p["value"]
-        # Сдвиг < 09:00 на +24 для фазы сна
+        # Shift < 09:00 by +24 for sleep schedule phase continuity
         adjusted_val = val
         if is_time_metric and val < 9.0:
             adjusted_val = val + 24.0
 
         formatted_points.append({
             "day": p["day"],
-            "date_ru": logic.format_date_ru(p["day"]),
+            "date_formatted": logic.format_date_en(p["day"]),
             "value": val,
             "adjusted_value": round(adjusted_val, 2),
             "display_value": logic.decimal_to_time_str(val) if is_time_metric else str(round(val, 1)),
@@ -86,7 +86,7 @@ def get_trends(
         })
         prev_date = p_date
 
-    # Расчёт статистики
+    # Statistical calculations
     raw_vals = [p["value"] for p in points_data]
     if raw_vals:
         avg_val = round(sum(raw_vals) / len(raw_vals), 1)
@@ -95,7 +95,7 @@ def get_trends(
     else:
         avg_val = min_val = max_val = None
 
-    # Дрейф фазы подъёма
+    # Wake time phase drift
     phase_drift = None
     if kind == "wake_time":
         wake_tuples = [(p["day"], p["value"]) for p in points_data]

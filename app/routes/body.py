@@ -10,12 +10,12 @@ router = APIRouter(prefix="/api", tags=["body"])
 
 @router.get("/body")
 def get_body_data(user: dict = Depends(auth.get_current_user)):
-    """Данные для экрана 'Тело'."""
+    """Data for Body view."""
     logical_today = logic.get_logical_day()
     curr_d = date.fromisoformat(logical_today)
 
     with store.session() as con:
-        # 1. Обхват живота
+        # 1. Waist circumference
         waist_rows = store.rows(
             con,
             "SELECT ts, value FROM metrics WHERE kind='waist' ORDER BY ts DESC, id DESC LIMIT 10",
@@ -29,7 +29,7 @@ def get_body_data(user: dict = Depends(auth.get_current_user)):
         else:
             waist_latest = waist_date = waist_delta = waist_spark = None
 
-        # 2. Вес
+        # 2. Weight
         weight_rows = store.rows(
             con,
             "SELECT ts, value FROM metrics WHERE kind='weight' ORDER BY ts DESC, id DESC LIMIT 10",
@@ -43,26 +43,26 @@ def get_body_data(user: dict = Depends(auth.get_current_user)):
         else:
             weight_latest = weight_date = weight_delta = weight_spark = None
 
-        # 3. Статистика тренировок
+        # 3. Workout statistics
         d7 = (curr_d - timedelta(days=6)).isoformat()
         d30 = (curr_d - timedelta(days=29)).isoformat()
         wo_count_7d = con.execute("SELECT COUNT(*) FROM workouts WHERE date>=?", (d7,)).fetchone()[0]
         wo_count_30d = con.execute("SELECT COUNT(*) FROM workouts WHERE date>=?", (d30,)).fetchone()[0]
 
-        # Последняя тренировка
+        # Last workout
         last_wo_row = con.execute(
             "SELECT date, kind, duration_min, load, note FROM workouts ORDER BY date DESC, id DESC LIMIT 1"
         ).fetchone()
         if last_wo_row:
             w_d = date.fromisoformat(last_wo_row["date"][:10])
             days_ago = (curr_d - w_d).days
-            days_label = "сегодня" if days_ago == 0 else f"{days_ago} д назад"
+            days_label = "today" if days_ago == 0 else f"{days_ago}d ago"
             last_workout = {
                 "date": last_wo_row["date"][:10],
-                "date_ru": logic.format_date_ru(last_wo_row["date"]),
+                "date_formatted": logic.format_date_en(last_wo_row["date"]),
                 "days_ago": days_ago,
                 "days_label": days_label,
-                "kind": last_wo_row["kind"] or "тренировка",
+                "kind": last_wo_row["kind"] or "workout",
                 "duration_min": last_wo_row["duration_min"],
                 "load": last_wo_row["load"],
                 "note": last_wo_row["note"],
@@ -70,7 +70,7 @@ def get_body_data(user: dict = Depends(auth.get_current_user)):
         else:
             last_workout = None
 
-        # 4. Календарь нагрузки за 28 дней (4x7)
+        # 4. Activity grid for 28 days (4x7)
         d28 = (curr_d - timedelta(days=27)).isoformat()
         wo_dates = {
             r["date"][:10]
@@ -92,14 +92,14 @@ def get_body_data(user: dict = Depends(auth.get_current_user)):
         "waist": {
             "latest": waist_latest,
             "date": waist_date,
-            "date_ru": logic.format_date_ru(waist_date) if waist_date else None,
+            "date_formatted": logic.format_date_en(waist_date) if waist_date else None,
             "delta": waist_delta,
             "sparkline": waist_spark,
         },
         "weight": {
             "latest": weight_latest,
             "date": weight_date,
-            "date_ru": logic.format_date_ru(weight_date) if weight_date else None,
+            "date_formatted": logic.format_date_en(weight_date) if weight_date else None,
             "delta": weight_delta,
             "sparkline": weight_spark,
         },
