@@ -1,0 +1,122 @@
+import os
+import pytest
+from fastapi.testclient import TestClient
+
+from app.api import app
+from app import config, store, logic
+
+client = TestClient(app)
+
+
+def test_health():
+    res = client.get("/api/health")
+    assert res.status_code == 200
+    data = res.json()
+    assert data == {"ok": True, "version": "1.0"}
+
+
+def test_today():
+    res = client.get("/api/today")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert "day" in data
+    assert "weekday" in data
+    assert "in_progress" in data
+    assert data["in_progress"] is True
+    assert "score" in data
+    assert "done" in data["score"]
+    assert "total" in data["score"]
+    assert "items" in data["score"]
+    assert "sleep" in data
+    assert "target" in data["sleep"]
+    assert "mood" in data
+    assert "hitmap" in data
+    assert len(data["hitmap"]) == 126
+
+
+def test_sleep_periods():
+    for days in [7, 30, 90]:
+        res = client.get(f"/api/sleep?days={days}")
+        assert res.status_code == 200
+        data = res.json()
+
+        assert data["period"]["days"] == days
+        assert len(data["series"]) == days
+        assert "target_hours" in data
+        assert "target_wake" in data
+        assert "prev_week" in data
+        assert "significant" in data["prev_week"]
+
+    # Invalid days returns 400
+    res_bad = client.get("/api/sleep?days=14")
+    assert res_bad.status_code == 400
+    assert res_bad.json()["error"]["code"] == "400"
+
+
+def test_body():
+    res = client.get("/api/body")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert "measurements" in data
+    assert len(data["measurements"]) == 4
+    kinds = [m["kind"] for m in data["measurements"]]
+    assert kinds == ["waist", "biceps_r", "forearm_r", "thigh_r"]
+
+    for m in data["measurements"]:
+        assert "label" in m
+        assert "unit" in m
+        assert "latest" in m
+        assert "delta_cm" in m
+        assert "significant" in m
+        assert "history" in m
+
+    assert "thigh_asymmetry" in data
+    assert "workouts" in data
+
+
+def test_task_done_flow():
+    # 1. Create a task via store
+    with store.session() as con:
+        cur = con.execute(
+            "INSERT INTO tasks(title, project, priority, status) VALUES('Test task for API', 'test', 1, 'open')"
+        )
+        task_id = cur.lastrowid
+
+    # 2. Mark task done via API
+    res = client.post(f"/api/tasks/{task_id}/done")
+    assert res.status_code == 200
+    assert res.json() == {"ok": True}
+
+    # 3. Verify task is closed
+    with store.session() as con:
+        row = con.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
+        assert row["status"] == "done"
+
+    # 4. Idempotency test (calling done again succeeds)
+    res_repeat = client.post(f"/api/tasks/{task_id}/done")
+    assert res_repeat.status_code == 200
+    assert res_repeat.json() == {"ok": True}
+
+
+def test_unhandled_route_returns_501():
+    res = client.get("/api/unsupported_route")
+    assert res.status_code == 501
+    assert res.json()["error"]["code"] == "501"
+
+
+def test_auth_protection_on_remote_request():
+    orig_dev = config.DEV_MODE
+    orig_user = getattr(config, "DEV_USER_ID", None)
+    config.DEV_MODE = False
+    config.DEV_USER_ID = None
+
+    try:
+        remote_client = TestClient(app, base_url="https://panel.example.com")
+        res = remote_client.get("/api/today")
+        assert res.status_code == 401
+        assert res.json()["error"]["code"] == "401"
+    finally:
+        config.DEV_MODE = orig_dev
+        config.DEV_USER_ID = orig_user

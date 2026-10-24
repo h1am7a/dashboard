@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Priest Life &mdash; Health &amp; Habits</title>
+  
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  
+  <!-- Genuine Apple SF Pro Fonts & Tailwind -->
+  <link rel="stylesheet" href="https://fonts.cdnfonts.com/css/sf-pro-display">
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+
+  <style>
+    /* iOS 18 True Dark Mode (Pure OLED Black) */
+    :root {
+      --bg-system: #000000;                      /* True OLED Black Canvas */
+      --bg-secondary: #1C1C1E;                   /* Apple Widget Dark Charcoal */
+      --bg-tertiary: #2C2C2E;                    /* Inset Surface */
+      --label-primary: #FFFFFF;                  /* Primary White */
+      --label-secondary: #8E8E93;                /* Classic iOS Gray */
+      --label-tertiary: #636366;                 /* Tertiary Gray */
+      --separator: rgba(255, 255, 255, 0.08);    /* Hairline 0.5px */
+      
+      /* Pure Apple HIG Tokens: Authentic iPhone Screen Time Cyan/Blue for Targets & Action Buttons */
+      --accent-blue: #32ADE6;                    /* 1:1 Authentic iPhone Screen Time Cyan */
+      --accent-green: #30D158;                   /* Green delta */
+      --accent-orange: #FF9F0A;                  /* Orange */
+      
+      /* Data series: Neutral monochrome graphite / silver */
+      --chart-neutral: #8E8E93;                  /* Candle / spline neutral data */
+      --chart-neutral-active: #FFFFFF;           /* Active / focused candle */
+      --chart-grid: rgba(255, 255, 255, 0.10);   /* Grid lines */
+      --bubble-bg: #2C2C2E;                      /* Tooltip */
+      --bar-bg: rgba(28, 28, 30, 0.88);          /* Translucent Bar */
+      --card-border: rgba(255, 255, 255, 0.06);
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      user-select: none;
+    }
+
+    body {
+      background-color: #000000;
+      color: var(--label-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "SF Pro", system-ui, sans-serif;
+      overflow-x: hidden;
+      touch-action: pan-y;
+    }
+
+    .sf-display {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro", sans-serif;
+      letter-spacing: -0.022em;
+    }
+
+    .num {
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum" 1;
+    }
+
+    /* iOS 18 Squircles */
+    .ios-widget-card {
+      background: var(--bg-secondary);
+      border-radius: 22px;
+      border: 0.5px solid var(--card-border);
+      position: relative;
+      overflow: hidden;
+      padding: 16px;
+    }
+
+    /* Clickable bars and nodes */
+    .chart-bar-clickable {
+      cursor: pointer;
+      transition: fill 0.15s ease, opacity 0.15s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .chart-bar-clickable:hover {
+      opacity: 0.85;
+    }
+
+    /* Speech bubble tooltip */
+    .speech-bubble {
+      filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
+      animation: popIn 0.18s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    @keyframes popIn {
+      0% { transform: scale(0.85) translateY(4px); opacity: 0; }
+      100% { transform: scale(1) translateY(0); opacity: 1; }
+    }
+
+    /* Screen containers */
+    .screen {
+      display: none;
+      flex-direction: column;
+      gap: 16px;
+      padding-bottom: 110px;
+    }
+    .screen.active {
+      display: flex;
+    }
+
+    .screen-content {
+      scrollbar-width: none;
+    }
+    .screen-content::-webkit-scrollbar {
+      display: none;
+    }
+
+    .ios-tab-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 68px;
+      background: var(--bar-bg);
+      backdrop-filter: blur(24px) saturate(190%);
+      -webkit-backdrop-filter: blur(24px) saturate(190%);
+      border-top: 0.5px solid var(--separator);
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      padding: 0 24px;
+      z-index: 40;
+    }
+
+    .ios-tab-btn {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      color: var(--label-secondary);
+      font-size: 10px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: color 0.15s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .ios-tab-btn.active {
+      color: var(--accent-blue);
+      font-weight: 600;
+    }
+
+    /* Skeleton loading */
+    .skeleton-box {
+      background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+      background-size: 200% 100%;
+      animation: skeletonShimmer 1.5s infinite;
+      border-radius: 12px;
+    }
+    @keyframes skeletonShimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-0 sm:p-4" onclick="handleGlobalClick(event)">
+
+  <!-- iPhone Max Canvas (390px) -->
+  <div class="w-full max-w-[390px] h-screen sm:h-[844px] bg-[var(--bg-system)] sm:rounded-[44px] overflow-hidden flex flex-col relative shadow-2xl border-0 sm:border sm:border-[rgba(255,255,255,0.1)]">
+    
+    <!-- Top Notch / Dynamic Island Safe Area Spacer -->
+    <div class="h-10 w-full flex-shrink-0"></div>
+
+    <!-- Main Screens Container -->
+    <div class="flex-1 overflow-y-auto px-4 screen-content relative">
+      
+      <!-- SCREEN 1: TODAY -->
+      <div id="screen-today" class="screen active"></div>
+
+      <!-- SCREEN 2: SLEEP -->
+      <div id="screen-sleep" class="screen"></div>
+
+      <!-- SCREEN 3: BODY -->
+      <div id="screen-body" class="screen"></div>
+
+    </div>
+
+    <!-- Bottom Tab Navigation Bar (3 Screens: Today, Sleep, Body) -->
+    <nav class="ios-tab-bar">
+      
+      <!-- Tab 1: Today -->
+      <div id="btn-today" class="ios-tab-btn active" onclick="switchTab('today')">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span>Today</span>
+      </div>
+
+      <!-- Tab 2: Sleep -->
+      <div id="btn-sleep" class="ios-tab-btn" onclick="switchTab('sleep')">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+        </svg>
+        <span>Sleep</span>
+      </div>
+
+      <!-- Tab 3: Body -->
+      <div id="btn-body" class="ios-tab-btn" onclick="switchTab('body')">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+        </svg>
+        <span>Body</span>
+      </div>
+
+    </nav>
+
+  </div>
+
+  <script>
+    /* =====================================================================
+       STATE & TELEGRAM INTEGRATION
+    ===================================================================== */
+    let currentTab = 'today';
+    let activeBarSelection = null;
+    let selectedWorkoutDayIndex = 0;
+    let sleepPeriod = 7;
+
+    let cachedToday = null;
+    let cachedSleep = {};
+    let cachedBody = null;
+
+    function initTelegram() {
+      if (window.Telegram && window.Telegram.WebApp) {
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+        try {
+          if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+          tg.setHeaderColor('#000000');
+          tg.setBackgroundColor('#000000');
+        } catch (e) {}
+      }
+    }
+
+    function triggerHaptic(style) {
+      if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
+        try {
+          window.Telegram.WebApp.HapticFeedback.impactOccurred(style || 'light');
+        } catch (e) {}
+      }
+    }
+
+    /* =====================================================================
+       API CLIENT
+    ===================================================================== */
+    async function apiRequest(endpoint, method = 'GET', body = null) {
+      const initData = window.Telegram?.WebApp?.initData || '';
+      const headers = {
+        'Accept': 'application/json',
+        'X-Init-Data': initData,
+        'X-Telegram-Init-Data': initData
+      };
+      if (body) {
+        headers['Content-Type'] = 'application/json';
+      }
+
+      const res = await fetch(endpoint, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined
+      });
+
+      if (!res.ok) {
+        let errMessage = `HTTP ${res.status}`;
+        try {
+          const errJson = await res.json();
+          if (errJson?.error?.message) errMessage = errJson.error.message;
+        } catch (e) {}
+        throw new Error(errMessage);
+      }
+      return await res.json();
+    }
+
+    function renderErrorState(container, msg, retryFn) {
+      container.innerHTML = `
+        <div class="ios-widget-card text-center py-10 space-y-3">
+          <div class="text-[var(--accent-orange)] text-sm font-semibold">Failed to load data</div>
+          <div class="text-xs text-[var(--label-secondary)]">${msg}</div>
+          <button onclick="${retryFn}" class="px-4 py-2 rounded-xl text-xs font-semibold bg-[var(--accent-blue)] text-black mt-2">
+            Retry
+          </button>
+        </div>
+      `;
+    }
+
+    function renderSkeletonState(container) {
+      container.innerHTML = `
+        <div class="ios-widget-card space-y-3 h-48 skeleton-box"></div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="ios-widget-card h-28 skeleton-box"></div>
+          <div class="ios-widget-card h-28 skeleton-box"></div>
+        </div>
+        <div class="ios-widget-card space-y-2 h-44 skeleton-box"></div>
+      `;
+    }
+
+    /* =====================================================================
+       BADGES & ARROWS
+    ===================================================================== */
+    function renderAppleArrowBadge(type, text, isNeutral = true) {
+      let icon = '';
+      let colorClass = isNeutral ? 'text-[var(--label-primary)]' : 'text-[var(--accent-orange)]';
+      let bgClass = isNeutral ? 'bg-[rgba(255,255,255,0.08)]' : 'bg-[rgba(255,159,10,0.15)]';
+
+      if (type === 'up') {
+        icon = '<svg class="w-2.5 h-2.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 17a1 1 0 01-1-1V5.414l-4.293 4.293a1 1 0 01-1.414-1.414l6-6a1 1 0 011.414 0l6 6a1 1 0 01-1.414 1.414L11 5.414V16a1 1 0 01-1 1z" clip-rule="evenodd"/></svg>';
+      } else if (type === 'down') {
+        icon = '<svg class="w-2.5 h-2.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v10.586l4.293-4.293a1 1 0 111.414 1.414l-6 6a1 1 0 01-1.414 0l-6-6a1 1 0 111.414-1.414L9 14.586V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>';
+      }
+
+      return `
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-tight ${colorClass} ${bgClass}">
+          ${icon}<span>${text}</span>
+        </span>
+      `;
+    }
+
+    /* =====================================================================
+       SCREEN 1: TODAY
+    ===================================================================== */
+    async function loadTodayScreen() {
+      const container = document.getElementById('screen-today');
+      if (!cachedToday) {
+        renderSkeletonState(container);
+      }
+
+      try {
+        const d = await apiRequest('/api/today');
+        cachedToday = d;
+        renderToday(d);
+      } catch (err) {
+        if (!cachedToday) {
+          renderErrorState(container, err.message, 'loadTodayScreen()');
+        }
+      }
+    }
+
+    function renderToday(d) {
+      const container = document.getElementById('screen-today');
+
+      function getHeatmapColor(pct) {
+        if (pct === null) return 'none';
+        if (pct === 0) return 'rgba(255, 255, 255, 0.08)';
+        if (pct < 50) return 'rgba(255, 255, 255, 0.28)';
+        if (pct < 75) return 'rgba(255, 255, 255, 0.55)';
+        if (pct < 100) return 'rgba(255, 255, 255, 0.80)';
+        return '#FFFFFF';
+      }
+
+      // Group 126 hitmap days into 18 weeks (7 days each)
+      const weeks = [];
+      for (let i = 0; i < d.hitmap.length; i += 7) {
+        weeks.push(d.hitmap.slice(i, i + 7));
+      }
+
+      const heatmapColsHtml = weeks.map(weekDays => {
+        const cellsHtml = weekDays.map(item => {
+          if (!item || item.percent === null) {
+            return `<div title="Empty day" style="width: 100%; aspect-ratio: 1; border-radius: 2px; background: transparent; border: 0.5px dashed var(--separator);"></div>`;
+          }
+          const bg = getHeatmapColor(item.percent);
+          const workoutDot = item.has_workout ? `<div style="width: 3.5px; height: 3.5px; border-radius: 50%; background: rgba(0,0,0,0.5);"></div>` : '';
+          return `<div title="${item.day}: ${item.percent}%" style="width: 100%; aspect-ratio: 1; border-radius: 2px; background: ${bg}; display: flex; align-items: center; justify-content: center;">${workoutDot}</div>`;
+        }).join('');
+
+        return `<div style="flex: 1; display: flex; flex-direction: column; gap: 3px;">${cellsHtml}</div>`;
+      }).join('');
+
+      // Dynamic month row across weeks
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      let lastMonth = -1;
+      const monthLabels = weeks.map((week, idx) => {
+        if (!week[0]) return '<span></span>';
+        const dObj = new Date(week[0].day);
+        const m = dObj.getMonth();
+        if (m !== lastMonth) {
+          lastMonth = m;
+          const isLatest = idx >= weeks.length - 3;
+          return `<span class="truncate ${isLatest ? 'text-[var(--label-primary)] font-bold' : ''}">${monthNames[m]}</span>`;
+        }
+        return '<span></span>';
+      });
+
+      const monthRowHtml = monthLabels.map(slot => `<div style="flex: 1; text-align: left; overflow: visible; white-space: nowrap;">${slot}</div>`).join('');
+
+      // Checklist items from array (habits have no button, tasks have Done)
+      const itemsHtml = d.score.items.map(it => {
+        if (it.type === 'habit') {
+          return `
+            <div class="flex items-center justify-between p-3 rounded-2xl bg-[var(--bg-tertiary)] text-xs border border-[var(--separator)]">
+              <div class="flex items-center gap-3">
+                <span class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${it.done ? 'bg-[var(--label-primary)] text-[var(--bg-system)]' : 'border border-dashed border-[var(--label-tertiary)]'}">
+                  ${it.done ? '&#10003;' : ''}
+                </span>
+                <span class="${it.done ? 'text-[var(--label-primary)]' : 'text-[var(--label-secondary)]'}">${it.title}</span>
+              </div>
+              <span class="text-[10px] font-medium text-[var(--label-tertiary)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 rounded-full">habit</span>
+            </div>
+          `;
+        } else {
+          const taskId = it.key.replace('task:', '');
+          return `
+            <div id="task-${taskId}" class="flex items-center justify-between p-3 rounded-2xl bg-[var(--bg-tertiary)] text-xs border border-[var(--separator)]">
+              <div class="flex items-center gap-3">
+                <span class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${it.done ? 'bg-[var(--accent-green)] text-black' : 'border border-[var(--label-tertiary)]'}">
+                  ${it.done ? '&#10003;' : ''}
+                </span>
+                <span class="${it.done ? 'line-through text-[var(--label-tertiary)]' : 'text-[var(--label-primary)] font-medium'}">${it.title}</span>
+              </div>
+              <div>
+                ${it.done ?
+                  '<span class="text-[11px] font-semibold text-[var(--accent-green)]">Completed</span>' :
+                  `<button onclick="markTaskDone(${taskId})" class="px-3 py-1 rounded-full text-xs font-semibold bg-[var(--accent-blue)] text-black shadow-sm active:scale-95 transition-transform">Done</button>`
+                }
+              </div>
+            </div>
+          `;
+        }
+      }).join('');
+
+      // Format date
+      const dateParts = d.day.split('-');
+      const dObj = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+      const dateFormatted = dObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+
+      // Sleep delta badge
+      let sleepDeltaHtml = '—';
+      if (d.sleep.delta_min !== null) {
+        const isNeutral = Math.abs(d.sleep.delta_min) <= 60;
+        const arrowType = d.sleep.delta_min > 0 ? 'up' : (d.sleep.delta_min < 0 ? 'down' : 'none');
+        sleepDeltaHtml = renderAppleArrowBadge(arrowType, `${Math.abs(d.sleep.delta_min)}min`, isNeutral);
+      }
+
+      // Mood 3D emoji
+      let moodEmoji = '&#128578;';
+      if (d.mood.label === 'Bad') moodEmoji = '&#128577;';
+      else if (d.mood.label === 'Meh') moodEmoji = '&#128528;';
+      else if (d.mood.label === 'Ok') moodEmoji = '&#128578;';
+      else if (d.mood.label === 'Good') moodEmoji = '&#128522;';
+      else if (d.mood.label === 'Great') moodEmoji = '&#128513;';
+
+      const statusText = d.in_progress ? 'IN PROGRESS' : (d.score.total > 0 && d.score.done === d.score.total ? 'COMPLETED' : 'NO DATA');
+
+      container.innerHTML = `
+        <!-- Today Header -->
+        <div class="flex items-baseline justify-between pt-1">
+          <div>
+            <h1 class="text-3xl font-bold tracking-tight text-[var(--label-primary)] sf-display">${d.weekday}</h1>
+            <div class="text-xs text-[var(--label-secondary)] mt-0.5">${dateFormatted}</div>
+          </div>
+          <div class="text-right">
+            <div class="text-2xl font-bold text-[var(--label-primary)] num leading-tight">${d.score.done} / ${d.score.total}</div>
+            <div class="text-[10px] font-semibold tracking-wider uppercase text-[var(--label-secondary)] mt-0.5">${statusText}</div>
+          </div>
+        </div>
+
+        <!-- Activity Pulse Heatmap -->
+        <div class="ios-widget-card space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Activity Pulse</span>
+          </div>
+
+          <div class="bg-[var(--bg-system)] p-3 rounded-2xl border border-[var(--separator)] space-y-2">
+            <!-- Months positioned over week columns -->
+            <div class="flex gap-2 items-center">
+              <div class="w-[12px] flex-shrink-0"></div>
+              <div class="flex-1 flex gap-[3px] text-[9px] font-semibold text-[var(--label-secondary)]">
+                ${monthRowHtml}
+              </div>
+            </div>
+
+            <div class="flex gap-2 items-center">
+              <!-- Day labels on the left -->
+              <div class="w-[12px] flex-shrink-0 flex flex-col justify-between text-[8px] font-medium text-[var(--label-secondary)] h-[78px] pr-0.5">
+                <span>M</span>
+                <span>W</span>
+                <span>F</span>
+              </div>
+              <div class="flex-1 flex gap-[3px] justify-between">
+                ${heatmapColsHtml}
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-1.5 border-t border-[var(--separator)] text-[8px] text-[var(--label-secondary)]">
+              <span class="flex items-center gap-1"><span style="width: 6.5px; height: 6.5px; border-radius: 1.5px; border: 0.5px dashed var(--separator); flex-shrink: 0;"></span> none</span>
+              <span class="flex items-center gap-1"><span style="width: 6.5px; height: 6.5px; border-radius: 1.5px; background: rgba(255,255,255,0.08); flex-shrink: 0;"></span> 0</span>
+              <span class="flex items-center gap-1"><span style="width: 6.5px; height: 6.5px; border-radius: 1.5px; background: rgba(255,255,255,0.28); flex-shrink: 0;"></span> 1&ndash;49</span>
+              <span class="flex items-center gap-1"><span style="width: 6.5px; height: 6.5px; border-radius: 1.5px; background: rgba(255,255,255,0.55); flex-shrink: 0;"></span> 50&ndash;74</span>
+              <span class="flex items-center gap-1"><span style="width: 6.5px; height: 6.5px; border-radius: 1.5px; background: rgba(255,255,255,0.80); flex-shrink: 0;"></span> 75&ndash;99</span>
+              <span class="flex items-center gap-1"><span style="width: 6.5px; height: 6.5px; border-radius: 1.5px; background: #FFFFFF; flex-shrink: 0;"></span> 100</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sleep Card with Target Delta & Single Mood Face -->
+        <div class="grid grid-cols-2 gap-3">
+          <div class="ios-widget-card flex flex-col justify-between h-[116px] p-3.5">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Sleep</span>
+              ${sleepDeltaHtml}
+            </div>
+            <div>
+              <div class="text-2xl font-bold tracking-tight text-[var(--label-primary)] num">${d.sleep.hours !== null ? d.sleep.hours + 'h' : '—'}</div>
+              <div class="text-[11px] text-[var(--label-secondary)] font-medium mt-0.5">${d.sleep.bed || '—'} &rarr; ${d.sleep.wake || '—'}</div>
+            </div>
+          </div>
+
+          <div class="ios-widget-card flex flex-col justify-between h-[116px] p-3.5">
+            <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Mood</span>
+            <div class="flex items-center gap-3">
+              <span class="text-3xl">${moodEmoji}</span>
+              <span class="text-xl font-bold text-[var(--label-primary)]">${d.mood.label || '—'}</span>
+            </div>
+            <div class="h-1"></div>
+          </div>
+        </div>
+
+        <!-- Daily Checklist Array -->
+        <div class="ios-widget-card space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Daily Checklist</span>
+            <span class="text-xs font-semibold text-[var(--label-secondary)] num">${d.score.done} of ${d.score.total}</span>
+          </div>
+          <div class="space-y-2">
+            ${itemsHtml}
+          </div>
+        </div>
+      `;
+    }
+
+    /* =====================================================================
+       SCREEN 2: SLEEP
+    ===================================================================== */
+    async function loadSleepScreen(days = sleepPeriod) {
+      sleepPeriod = days;
+      const container = document.getElementById('screen-sleep');
+      if (!cachedSleep[days]) {
+        renderSkeletonState(container);
+      }
+
+      try {
+        const d = await apiRequest(`/api/sleep?days=${days}`);
+        cachedSleep[days] = d;
+        renderSleep(d, days);
+      } catch (err) {
+        if (!cachedSleep[days]) {
+          renderErrorState(container, err.message, `loadSleepScreen(${days})`);
+        }
+      }
+    }
+
+    function renderSleep(d, periodDays) {
+      const container = document.getElementById('screen-sleep');
+
+      function generateSmoothSpline(pts) {
+        if (pts.length === 0) return '';
+        if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
+        let path = `M ${pts[0].x} ${pts[0].y}`;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const p0 = i > 0 ? pts[i - 1] : pts[i];
+          const p1 = pts[i];
+          const p2 = pts[i + 1];
+          const p3 = i < pts.length - 2 ? pts[i + 2] : p2;
+          const cp1x = p1.x + (p2.x - p0.x) / 6;
+          const cp1y = p1.y + (p2.y - p0.y) / 6;
+          const cp2x = p2.x - (p3.x - p1.x) / 6;
+          const cp2y = p2.y - (p3.y - p1.y) / 6;
+          path += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+        }
+        return path;
+      }
+
+      const svgW = 326;
+      const svgH = 110;
+      const padTop = 15;
+      const padBot = 22;
+      const plotH = svgH - padTop - padBot;
+
+      // 1. SLEEP DURATION BARS
+      const yMinS = 4.0;
+      const yMaxS = 10.0;
+      const targetS = d.target_hours || 7.5;
+      const targetY_S = padTop + plotH - ((targetS - yMinS) / (yMaxS - yMinS)) * plotH;
+
+      const seriesCount = d.series.length;
+      const barWidth = seriesCount === 7 ? 24 : (seriesCount === 30 ? 5 : 16);
+      const gap = (svgW - (seriesCount * barWidth)) / (seriesCount + 1);
+
+      const barsHtml = d.series.map((item, idx) => {
+        const x = gap + idx * (barWidth + gap);
+        if (item.hours === null) {
+          return `<rect x="${x}" y="${padTop + plotH - 2}" width="${barWidth}" height="2" fill="rgba(255,255,255,0.06)" rx="1"/>`;
+        }
+        const clampedHours = Math.max(yMinS, Math.min(yMaxS, item.hours));
+        const barH = ((clampedHours - yMinS) / (yMaxS - yMinS)) * plotH;
+        const y = padTop + plotH - barH;
+        const isSelected = activeBarSelection && activeBarSelection.chart === 'sleep' && activeBarSelection.index === idx;
+        const fillColor = isSelected ? 'var(--chart-neutral-active)' : 'var(--chart-neutral)';
+
+        const dayNum = item.day.split('-')[2];
+        const labelText = seriesCount <= 7 ? ['M','T','W','T','F','S','S'][idx % 7] : (idx % 7 === 0 ? dayNum : '');
+
+        return `
+          <g class="chart-bar-clickable" onclick="handleBarClick('sleep', ${idx}, event)">
+            <rect x="${x}" y="${y}" width="${barWidth}" height="${barH}" fill="${fillColor}" rx="${barWidth > 10 ? 4 : 2}"/>
+            ${labelText ? `<text x="${x + barWidth/2}" y="${svgH - 6}" font-size="9" fill="var(--label-secondary)" text-anchor="middle" font-weight="500">${labelText}</text>` : ''}
+          </g>
+        `;
+      }).join('');
+
+      // Tooltip for selected bar
+      let bubbleHtml = '';
+      if (activeBarSelection && activeBarSelection.chart === 'sleep') {
+        const it = d.series[activeBarSelection.index];
+        const bx = gap + activeBarSelection.index * (barWidth + gap) + barWidth / 2;
+        bubbleHtml = `
+          <g class="speech-bubble" transform="translate(${Math.max(45, Math.min(svgW - 45, bx))}, 18)">
+            <rect x="-42" y="-14" width="84" height="22" rx="6" fill="var(--bubble-bg)" stroke="var(--separator)" stroke-width="0.5"/>
+            <text x="0" y="1" font-size="9.5" fill="var(--label-primary)" text-anchor="middle" font-weight="600">${it.hours ? it.hours + 'h' : 'No data'}</text>
+          </g>
+        `;
+      }
+
+      // 2. WAKE TIME SPLINE
+      const yMinW = 10.0;
+      const yMaxW = 18.0;
+      const targetW = 14.5;
+      const targetY_W = padTop + plotH - ((targetW - yMinW) / (yMaxW - yMinW)) * plotH;
+
+      const wakePoints = [];
+      d.series.forEach((it, idx) => {
+        if (!it.wake) return;
+        const parts = it.wake.split(':');
+        const val = parseInt(parts[0]) + parseInt(parts[1]) / 60;
+        const clampedVal = Math.max(yMinW, Math.min(yMaxW, val));
+        const px = gap + idx * (barWidth + gap) + barWidth / 2;
+        const py = padTop + plotH - ((clampedVal - yMinW) / (yMaxW - yMinW)) * plotH;
+        wakePoints.push({ x: px, y: py, raw: it.wake, day: it.day });
+      });
+      const wakePathD = generateSmoothSpline(wakePoints);
+
+      // 3. BED TIME SPLINE
+      const yMinB = 4.0;
+      const yMaxB = 12.0;
+      const targetB = 8.0;
+      const targetY_B = padTop + plotH - ((targetB - yMinB) / (yMaxB - yMinB)) * plotH;
+
+      const bedPoints = [];
+      d.series.forEach((it, idx) => {
+        if (!it.bed) return;
+        const parts = it.bed.split(':');
+        const val = parseInt(parts[0]) + parseInt(parts[1]) / 60;
+        const clampedVal = Math.max(yMinB, Math.min(yMaxB, val));
+        const px = gap + idx * (barWidth + gap) + barWidth / 2;
+        const py = padTop + plotH - ((clampedVal - yMinB) / (yMaxB - yMinB)) * plotH;
+        bedPoints.push({ x: px, y: py, raw: it.bed, day: it.day });
+      });
+      const bedPathD = generateSmoothSpline(bedPoints);
+
+      // Previous week badge
+      let prevWeekBadge = '';
+      if (d.prev_week && d.prev_week.significant) {
+        const arrow = d.prev_week.delta_hours >= 0 ? 'up' : 'down';
+        prevWeekBadge = renderAppleArrowBadge(arrow, `${Math.abs(d.prev_week.delta_hours)}h vs prev week`, true);
+      }
+
+      container.innerHTML = `
+        <!-- Sleep Header -->
+        <div class="flex items-baseline justify-between pt-1">
+          <div>
+            <h1 class="text-3xl font-bold tracking-tight text-[var(--label-primary)] sf-display">Sleep</h1>
+            <div class="text-xs text-[var(--label-secondary)] mt-0.5">Duration and schedule</div>
+          </div>
+          <div class="text-right">
+            <div class="text-2xl font-bold text-[var(--label-primary)] num leading-tight">${d.avg_hours ? d.avg_hours + 'h' : '—'}</div>
+            <div class="mt-0.5">${prevWeekBadge}</div>
+          </div>
+        </div>
+
+        <!-- Period Switcher: 7 Days / 30 Days / 90 Days -->
+        <div class="flex p-1 bg-[var(--bg-secondary)] rounded-xl border border-[var(--separator)]">
+          <button onclick="selectPeriod(7)" class="flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${periodDays === 7 ? 'bg-[var(--bg-tertiary)] text-[var(--label-primary)] shadow-sm' : 'text-[var(--label-secondary)]'}">7 Days</button>
+          <button onclick="selectPeriod(30)" class="flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${periodDays === 30 ? 'bg-[var(--bg-tertiary)] text-[var(--label-primary)] shadow-sm' : 'text-[var(--label-secondary)]'}">30 Days</button>
+          <button onclick="selectPeriod(90)" class="flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${periodDays === 90 ? 'bg-[var(--bg-tertiary)] text-[var(--label-primary)] shadow-sm' : 'text-[var(--label-secondary)]'}">90 Days</button>
+        </div>
+
+        <!-- Chart 1: Sleep Duration -->
+        <div class="ios-widget-card space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Sleep Duration</span>
+            <span class="text-[11px] font-semibold text-[var(--accent-blue)]">Target: ${d.target_hours}h</span>
+          </div>
+          <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-auto overflow-visible">
+            <line x1="0" y1="${targetY_S}" x2="${svgW}" y2="${targetY_S}" stroke="var(--accent-blue)" stroke-width="1.2" stroke-dasharray="4 3"/>
+            <line x1="0" y1="${padTop + plotH}" x2="${svgW}" y2="${padTop + plotH}" stroke="var(--chart-grid)" stroke-width="0.5"/>
+            ${barsHtml}
+            ${bubbleHtml}
+          </svg>
+        </div>
+
+        <!-- Chart 2: Wake Time -->
+        <div class="ios-widget-card space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Wake Time</span>
+            <span class="text-[11px] font-semibold text-[var(--accent-blue)]">Target: ${d.target_wake}</span>
+          </div>
+          <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-auto overflow-visible">
+            <line x1="0" y1="${targetY_W}" x2="${svgW}" y2="${targetY_W}" stroke="var(--accent-blue)" stroke-width="1.2" stroke-dasharray="4 3"/>
+            <line x1="0" y1="${padTop + plotH}" x2="${svgW}" y2="${padTop + plotH}" stroke="var(--chart-grid)" stroke-width="0.5"/>
+            <path d="${wakePathD}" fill="none" stroke="var(--chart-neutral)" stroke-width="2" stroke-linecap="round"/>
+            ${wakePoints.map(p => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="var(--chart-neutral)" stroke="var(--bg-secondary)" stroke-width="1.5"/>`).join('')}
+          </svg>
+        </div>
+
+        <!-- Chart 3: Bed Time -->
+        <div class="ios-widget-card space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Bed Time</span>
+            <span class="text-[11px] font-semibold text-[var(--accent-blue)]">Target: 08:00</span>
+          </div>
+          <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-auto overflow-visible">
+            <line x1="0" y1="${targetY_B}" x2="${svgW}" y2="${targetY_B}" stroke="var(--accent-blue)" stroke-width="1.2" stroke-dasharray="4 3"/>
+            <line x1="0" y1="${padTop + plotH}" x2="${svgW}" y2="${padTop + plotH}" stroke="var(--chart-grid)" stroke-width="0.5"/>
+            <path d="${bedPathD}" fill="none" stroke="var(--chart-neutral)" stroke-width="2" stroke-linecap="round"/>
+            ${bedPoints.map(p => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="var(--chart-neutral)" stroke="var(--bg-secondary)" stroke-width="1.5"/>`).join('')}
+          </svg>
+        </div>
+      `;
+    }
+
+    /* =====================================================================
+       SCREEN 3: BODY
+    ===================================================================== */
+    async function loadBodyScreen() {
+      const container = document.getElementById('screen-body');
+      if (!cachedBody) {
+        renderSkeletonState(container);
+      }
+
+      try {
+        const d = await apiRequest('/api/body');
+        cachedBody = d;
+        renderBody(d);
+      } catch (err) {
+        if (!cachedBody) {
+          renderErrorState(container, err.message, 'loadBodyScreen()');
+        }
+      }
+    }
+
+    function renderBody(d) {
+      const container = document.getElementById('screen-body');
+
+      function generateSparkline(vals, w = 120, h = 28) {
+        if (!vals || vals.length < 2) {
+          return `<line x1="0" y1="${h/2}" x2="${w}" y2="${h/2}" stroke="var(--chart-grid)" stroke-width="1" stroke-dasharray="2 2"/>`;
+        }
+        const min = Math.min(...vals);
+        const max = Math.max(...vals);
+        const range = (max - min) || 1;
+        const pts = vals.map((v, i) => {
+          const x = (i / (vals.length - 1)) * w;
+          const y = h - 4 - ((v - min) / range) * (h - 8);
+          return `${x.toFixed(1)},${y.toFixed(1)}`;
+        }).join(' ');
+        return `<polyline fill="none" stroke="var(--chart-neutral)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" points="${pts}"/>`;
+      }
+
+      // Render 4 measurement cards
+      const cardsHtml = d.measurements.map(m => {
+        let deltaBadge = '<span class="text-xs text-[var(--label-tertiary)]">—</span>';
+        if (m.latest !== null) {
+          if (m.significant) {
+            const dir = m.delta_cm >= 0 ? 'up' : 'down';
+            deltaBadge = renderAppleArrowBadge(dir, `${Math.abs(m.delta_cm)}${m.unit}`, true);
+          } else {
+            deltaBadge = '<span class="text-[11px] font-semibold text-[var(--label-secondary)]">no change</span>';
+          }
+        }
+
+        const historyVals = m.history.map(h => h.value);
+        const sparkSvg = generateSparkline(historyVals);
+
+        let asymmetryHtml = '';
+        if (m.kind === 'thigh_r' && d.thigh_asymmetry) {
+          const asy = d.thigh_asymmetry;
+          const diffSign = asy.diff > 0 ? '+' : '';
+          asymmetryHtml = `
+            <div class="pt-2 border-t border-[var(--separator)] text-[10px] text-[var(--label-secondary)] flex justify-between">
+              <span>L ${asy.left}</span>
+              <span class="num">diff ${diffSign}${asy.diff}</span>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="ios-widget-card p-3.5 flex flex-col justify-between space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">${m.label}</span>
+              <span class="text-[10px] text-[var(--label-tertiary)]">${m.cadence}</span>
+            </div>
+            <div class="flex items-baseline justify-between">
+              <span class="text-2xl font-bold tracking-tight text-[var(--label-primary)] num">${m.latest !== null ? m.latest + m.unit : 'no data'}</span>
+              ${deltaBadge}
+            </div>
+            <div class="w-full h-7">
+              <svg viewBox="0 0 120 28" class="w-full h-full overflow-visible">${sparkSvg}</svg>
+            </div>
+            ${asymmetryHtml}
+          </div>
+        `;
+      }).join('');
+
+      // Workouts week strip (last 7 days or current week)
+      const dayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+      const todayIso = new Date().toISOString().substring(0, 10);
+
+      // Get last 7 days of workouts
+      const recentWorkouts = d.workouts.slice(0, 7);
+      const workoutDays = Array.from({ length: 7 }, (_, i) => {
+        const dObj = new Date();
+        dObj.setDate(dObj.getDate() - (6 - i));
+        const iso = dObj.toISOString().substring(0, 10);
+        const wo = d.workouts.find(w => w.date === iso);
+        return {
+          dayName: dayNames[i],
+          date: iso,
+          workout: wo,
+          isToday: iso === todayIso
+        };
+      });
+
+      const stripHtml = workoutDays.map((wDay, idx) => {
+        const isSelected = selectedWorkoutDayIndex === idx;
+        const hasWo = !!wDay.workout;
+        let dotClass = 'border border-[var(--separator)] bg-transparent';
+        if (hasWo) dotClass = 'bg-[var(--label-primary)]';
+
+        return `
+          <div onclick="selectWorkoutDay(${idx})" class="flex-1 flex flex-col items-center gap-1.5 cursor-pointer">
+            <span class="text-[10px] ${isSelected ? 'text-white font-bold' : 'text-[var(--label-secondary)] font-medium'}">${wDay.dayName}</span>
+            <div class="w-6 h-6 rounded-full flex items-center justify-center ${isSelected ? 'ring-2 ring-white ring-offset-2 ring-offset-black' : ''}">
+              <div class="w-2.5 h-2.5 rounded-full ${dotClass}"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const selDay = workoutDays[selectedWorkoutDayIndex] || workoutDays[6];
+      let detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-2">No workout logged for this day (Rest day).</div>';
+      if (selDay && selDay.workout) {
+        const w = selDay.workout;
+        detailHtml = `
+          <div class="space-y-2 pt-1 text-xs">
+            <div class="flex items-center justify-between">
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[rgba(255,255,255,0.08)] text-[var(--label-primary)] uppercase">${w.kind} &bull; ${w.load}</span>
+              <span class="text-[var(--label-secondary)] num font-medium">${w.duration_min} min</span>
+            </div>
+            <div class="text-[var(--label-primary)] font-normal leading-relaxed">${w.note || 'Regular training session.'}</div>
+          </div>
+        `;
+      }
+
+      container.innerHTML = `
+        <!-- Body Header -->
+        <div class="flex items-baseline justify-between pt-1">
+          <div>
+            <h1 class="text-3xl font-bold tracking-tight text-[var(--label-primary)] sf-display">Body</h1>
+            <div class="text-xs text-[var(--label-secondary)] mt-0.5">Workouts and measurements</div>
+          </div>
+        </div>
+
+        <!-- 4 Measurement Cards -->
+        <div class="grid grid-cols-2 gap-3">
+          ${cardsHtml}
+        </div>
+
+        <!-- Workout Strip -->
+        <div class="ios-widget-card space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Weekly Workouts</span>
+            <span class="text-xs text-[var(--label-tertiary)]">${selDay ? selDay.date : ''}</span>
+          </div>
+          <div class="flex justify-between items-center py-1">
+            ${stripHtml}
+          </div>
+          <div class="pt-2 border-t border-[var(--separator)]">
+            ${detailHtml}
+          </div>
+        </div>
+      `;
+    }
+
+    /* =====================================================================
+       INTERACTION HANDLERS
+    ===================================================================== */
+    function switchTab(tab) {
+      triggerHaptic('light');
+      currentTab = tab;
+      document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.ios-tab-btn').forEach(el => el.classList.remove('active'));
+
+      const targetScreen = document.getElementById(`screen-${tab}`);
+      if (targetScreen) targetScreen.classList.add('active');
+
+      const targetTabBtn = document.getElementById(`btn-${tab}`);
+      if (targetTabBtn) targetTabBtn.classList.add('active');
+
+      activeBarSelection = null;
+
+      if (tab === 'today') loadTodayScreen();
+      if (tab === 'sleep') loadSleepScreen(sleepPeriod);
+      if (tab === 'body') loadBodyScreen();
+    }
+
+    function selectPeriod(days) {
+      triggerHaptic('selectionChanged');
+      loadSleepScreen(days);
+    }
+
+    function handleBarClick(chart, index, event) {
+      if (event) event.stopPropagation();
+      triggerHaptic('light');
+      if (activeBarSelection && activeBarSelection.chart === chart && activeBarSelection.index === index) {
+        activeBarSelection = null;
+      } else {
+        activeBarSelection = { chart, index };
+      }
+      if (cachedSleep[sleepPeriod]) {
+        renderSleep(cachedSleep[sleepPeriod], sleepPeriod);
+      }
+    }
+
+    function handleGlobalClick(event) {
+      if (activeBarSelection !== null) {
+        activeBarSelection = null;
+        if (cachedSleep[sleepPeriod]) {
+          renderSleep(cachedSleep[sleepPeriod], sleepPeriod);
+        }
+      }
+    }
+
+    function selectWorkoutDay(idx) {
+      triggerHaptic('selectionChanged');
+      selectedWorkoutDayIndex = idx;
+      if (cachedBody) {
+        renderBody(cachedBody);
+      }
+    }
+
+    async function markTaskDone(taskId) {
+      triggerHaptic('medium');
+      const taskEl = document.getElementById(`task-${taskId}`);
+      if (taskEl) {
+        taskEl.style.opacity = '0.4';
+      }
+
+      try {
+        await apiRequest(`/api/tasks/${taskId}/done`, 'POST');
+        // Refresh today data
+        const d = await apiRequest('/api/today');
+        cachedToday = d;
+        renderToday(d);
+      } catch (err) {
+        alert('Failed to mark task done: ' + err.message);
+        if (taskEl) taskEl.style.opacity = '1.0';
+      }
+    }
+
+    // Initial boot
+    document.addEventListener('DOMContentLoaded', () => {
+      initTelegram();
+      loadTodayScreen();
+    });
+  </script>
+</body>
+</html>
