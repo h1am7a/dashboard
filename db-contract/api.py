@@ -14,6 +14,12 @@ from datetime import date as date_cls, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
