@@ -279,6 +279,7 @@
         const tg = window.Telegram.WebApp;
         tg.ready();
         tg.expand();
+        if (tg.isVerticalSwipesEnabled !== undefined) { tg.isVerticalSwipesEnabled = false; }
         try {
           if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
           tg.setHeaderColor('#000000');
@@ -1458,7 +1459,16 @@
         cachedToday = d;
         renderToday(d);
       } catch (err) {
-        alert('Failed to mark task done: ' + err.message);
+        const text = 'Failed to mark task done: ' + err.message;
+        const tg = window.Telegram?.WebApp;
+        if (tg?.HapticFeedback) {
+          try { tg.HapticFeedback.notificationOccurred('error'); } catch (e) {}
+        }
+        if (tg?.showAlert) {
+          tg.showAlert(text);
+        } else {
+          alert(text);
+        }
         if (taskEl) taskEl.style.opacity = '1.0';
       }
     }
