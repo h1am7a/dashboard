@@ -247,7 +247,7 @@ def _today() -> str:
 
 
 def _norm_date(value: str | None) -> str:
-    if not value or value in ("today", "сегодня"):
+    if not value or value in ("today", "сегодня", "now"):
         return _today()
     s = value.strip()
     if s in ("yesterday", "вчера"):
@@ -468,13 +468,13 @@ def report(days: int = 7, con: sqlite3.Connection | None = None) -> dict:
 # не отмечает руками: всё выводится из метрик, тренировок и задач.
 # --------------------------------------------------------------------------
 DEFAULT_HABITS = [
-    ("sleep_ge_7",   "Сон ≥ 7 ч",           {"t": "metric_ge", "kind": "sleep_hours", "value": 7}, 10),
-    ("wake_window",  "Подъём в окне цели",  {"t": "wake_window", "tol_min": 60}, 20),
-    ("workout_day",  "Тренировка",          {"t": "workouts_ge", "value": 1}, 30),
-    ("protein_ok",   "Белок в первом приёме", {"t": "metric_ge", "kind": "protein_ok", "value": 1}, 40),
-    ("routine_eve",  "Вечерняя рутина",     {"t": "metric_ge", "kind": "routine_ok", "value": 1}, 50),
-    ("routine_am",   "Утренняя рутина",     {"t": "metric_ge", "kind": "routine_am", "value": 1}, 55),
-    ("walk_30",      "Ходьба ≥ 30 мин",     {"t": "metric_ge", "kind": "walk_min", "value": 30}, 60),
+    ("sleep_ge_7",   "Sleep ≥ 7h",           {"t": "metric_ge", "kind": "sleep_hours", "value": 7}, 10),
+    ("wake_window",  "Wake in window",       {"t": "wake_window", "tol_min": 60}, 20),
+    ("workout_day",  "Workout",              {"t": "workouts_ge", "value": 1}, 30),
+    ("protein_ok",   "Protein target",       {"t": "metric_ge", "kind": "protein_ok", "value": 1}, 40),
+    ("routine_eve",  "Evening routine",      {"t": "metric_ge", "kind": "routine_ok", "value": 1}, 50),
+    ("routine_am",   "Morning routine",      {"t": "metric_ge", "kind": "routine_am", "value": 1}, 55),
+    ("walk_30",      "Walk ≥ 30m",           {"t": "metric_ge", "kind": "walk_min", "value": 30}, 60),
 ]
 
 # Якоря, выключенные на старте (пользователь ещё не начал).
@@ -516,7 +516,7 @@ def habits_list(day: str | None = None, include_inactive: bool = False) -> list[
 def add_habit(key: str, title: str, rule: dict, active_from: str | None = None,
               sort: int = 100, note: str | None = None) -> None:
     if not key or not title:
-        raise ValueError("habit: нужны key и title")
+        raise ValueError("habit: key and title are required")
     if rule.get("t") not in ("metric_ge", "workouts_ge", "wake_window"):
         raise ValueError("habit: rule.t ∈ metric_ge / workouts_ge / wake_window")
     with session() as c:

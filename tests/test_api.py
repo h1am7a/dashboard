@@ -77,6 +77,11 @@ def test_body():
     for k in ["waist", "biceps_r", "forearm_r"]:
         assert k in kinds
 
+    labels = {m["kind"]: m["label"] for m in data["measurements"]}
+    assert labels["biceps_r"] == "Biceps"
+    assert labels["forearm_r"] == "Forearm"
+    assert labels["waist"] == "Waist" 
+
     for m in data["measurements"]:
         assert "label" in m
         assert "unit" in m
@@ -141,3 +146,13 @@ def test_config_db_path_and_no_logic():
     assert hasattr(config, "DB_PATH")
     assert not hasattr(config, "PRIEST_DB")
     assert not (Path(__file__).parent.parent / "app" / "logic.py").exists()
+
+
+def test_static_assets():
+    res = client.get("/assets/style.css")
+    assert res.status_code == 200
+    assert len(res.text) > 100
+
+    res_index = client.get("/")
+    assert res_index.status_code == 200
+    assert "SF Pro Display" in res_index.text

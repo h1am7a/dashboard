@@ -53,8 +53,8 @@ def _http_exc_handler(request, exc: HTTPException):
 MOOD_LABELS = [(2, "Bad"), (4, "Meh"), (6, "Ok"), (8, "Good"), (10, "Great")]
 BODY_META = {
     "waist": ("Waist", "weekly"),
-    "biceps_r": ("Biceps (R)", "monthly"),
-    "forearm_r": ("Forearm (R)", "monthly"),
+    "biceps_r": ("Biceps", "monthly"),
+    "forearm_r": ("Forearm", "monthly"),
     "thigh_r": ("Thigh (R)", "monthly"),
 }
 BODY_ORDER = ["waist", "biceps_r", "forearm_r", "thigh_r"]
@@ -106,23 +106,23 @@ def _mood_label(value) -> str | None:
 def _validate_init_data(raw: str) -> dict:
     token = os.environ.get("BOT_TOKEN")
     if not token:
-        raise HTTPException(500, {"error": {"code": "no_token", "message": "BOT_TOKEN не задан"}})
+        raise HTTPException(500, {"error": {"code": "no_token", "message": "BOT_TOKEN is not set"}})
     pairs = dict(parse_qsl(raw, keep_blank_values=True))
     received = pairs.pop("hash", None)
     if not received:
-        raise HTTPException(401, {"error": {"code": "no_hash", "message": "нет hash"}})
+        raise HTTPException(401, {"error": {"code": "no_hash", "message": "missing hash"}})
     check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
     secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
     calc = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(calc, received):
-        raise HTTPException(401, {"error": {"code": "bad_signature", "message": "подпись неверна"}})
+        raise HTTPException(401, {"error": {"code": "bad_signature", "message": "invalid signature"}})
     auth_date = int(pairs.get("auth_date", "0") or 0)
     if _now().timestamp() - auth_date > 86400:
-        raise HTTPException(401, {"error": {"code": "expired", "message": "initData просрочен"}})
+        raise HTTPException(401, {"error": {"code": "expired", "message": "initData expired"}})
     allowed = os.environ.get("ALLOWED_USER_ID")
     user = json.loads(pairs.get("user") or "{}")
     if allowed and str(user.get("id")) != str(allowed):
-        raise HTTPException(403, {"error": {"code": "forbidden", "message": "чужой user_id"}})
+        raise HTTPException(403, {"error": {"code": "forbidden", "message": "forbidden user_id"}})
     return user
 
 
@@ -135,7 +135,7 @@ def _auth(x_init_data: str | None = None, x_telegram_init_data: str | None = Non
             return {"id": int(dev), "dev": True}
         if dev_mode and dev_mode.lower() in ("1", "true", "yes"):
             return {"id": 1, "dev": True}
-        raise HTTPException(401, {"error": {"code": "no_init_data", "message": "нужен X-Init-Data"}})
+        raise HTTPException(401, {"error": {"code": "no_init_data", "message": "missing X-Init-Data"}})
     return _validate_init_data(data)
 
 
@@ -191,7 +191,7 @@ def sleep(
 ):
     _auth(x_init_data, x_telegram_init_data)
     if days not in (7, 30, 90):
-        raise HTTPException(400, {"error": {"code": "bad_period", "message": "days: 7, 30 или 90"}})
+        raise HTTPException(400, {"error": {"code": "bad_period", "message": "days must be 7, 30, or 90"}})
     end = date_cls.fromisoformat(_today_date())
     start = end - timedelta(days=days - 1)
     with store.session() as c:
@@ -275,7 +275,7 @@ def task_done(
     with store.session() as c:
         row = c.execute("SELECT id, status FROM tasks WHERE id=?", (task_id,)).fetchone()
     if not row:
-        raise HTTPException(404, {"error": {"code": "not_found", "message": "нет такой задачи"}})
+        raise HTTPException(404, {"error": {"code": "not_found", "message": "task not found"}})
     if row["status"] != "done":
         store.close_task(task_id)
     return {"ok": True}
@@ -285,38 +285,45 @@ def task_done(
 def api_unhandled(unhandled_path: str):
     return JSONResponse(
         status_code=501,
-        content={"error": {"code": "not_implemented", "message": "эндпоинт не реализован"}},
+        content={"error": {"code": "not_implemented", "message": "endpoint not implemented"}},
     )
 
 
-# --- статика -------------------------------------------------------------
+# --- static & assets ---------------------------------------------------
 
 _WEB_BASE = Path(__file__).resolve().parent.parent / "web"
 _DIST = _WEB_BASE / "dist"
-_STATIC_ROOT = _DIST if _DIST.is_dir() else _WEB_BASE
+_STATIC_ROOT = _DIST if (_DIST / "index.html").is_file() and (_DIST / "assets").is_dir() else _WEB_BASE
 
-if (_STATIC_ROOT / "assets").is_dir():
-    app.mount("/assets", StaticFiles(directory=str(_STATIC_ROOT / "assets")), name="assets")
+_ASSETS_DIR = _STATIC_ROOT / "assets" if (_STATIC_ROOT / "assets").is_dir() else _WEB_BASE / "assets"
+if _ASSETS_DIR.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_ASSETS_DIR)), name="assets")
 
 @app.get("/{path:path}")
 def spa(path: str):
     if path.startswith("api/") or path == "api":
         return JSONResponse(
             status_code=501,
-            content={"error": {"code": "not_implemented", "message": "эндпоинт не реализован"}},
+            content={"error": {"code": "not_implemented", "message": "endpoint not implemented"}},
         )
 
     forbidden_exts = (".py", ".db", ".sqlite", ".env", ".sh", ".sql", ".md", ".toml", ".ini")
     clean = path.lower()
     if ".." in clean or clean.startswith("/") or clean.endswith(forbidden_exts) or "/." in clean or clean.startswith("."):
-        raise HTTPException(404, {"error": {"code": "not_found", "message": "файл не найден"}})
+        raise HTTPException(404, {"error": {"code": "not_found", "message": "file not found"}})
 
     if path:
         target = (_STATIC_ROOT / path).resolve()
         if target.is_file() and target.is_relative_to(_STATIC_ROOT.resolve()):
             return FileResponse(str(target))
+        target_web = (_WEB_BASE / path).resolve()
+        if target_web.is_file() and target_web.is_relative_to(_WEB_BASE.resolve()):
+            return FileResponse(str(target_web))
 
     index_file = _STATIC_ROOT / "index.html"
     if index_file.is_file():
         return FileResponse(str(index_file))
-    raise HTTPException(404, {"error": {"code": "not_found", "message": "index.html не найден"}})
+    index_web = _WEB_BASE / "index.html"
+    if index_web.is_file():
+        return FileResponse(str(index_web))
+    raise HTTPException(404, {"error": {"code": "not_found", "message": "index.html not found"}})
