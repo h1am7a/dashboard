@@ -741,7 +741,7 @@
         `;
       }).join('');
 
-      let durationDisplay = d.avg_hours ? formatDuration(d.avg_hours) : '7h30m';
+      let durationDisplay = d.avg_hours ? formatDuration(d.avg_hours) : '&mdash;';
       let durationSub = 'Daily Average';
       if (selectedItem && selectedItem.hours !== null) {
         durationDisplay = formatDuration(selectedItem.hours);
@@ -824,7 +824,7 @@
       }).join('');
 
       const lastWakePoint = wkPts.length ? wkPts[wkPts.length - 1] : null;
-      let wakeDisplay = d.avg_wake || lastWakePoint?.raw || targetW_str;
+      let wakeDisplay = d.avg_wake || lastWakePoint?.raw || '&mdash;';
       let wakeSub = 'Daily Average';
       if (selWakeItem && selWakeItem.wake) {
         wakeDisplay = selWakeItem.wake;
@@ -909,7 +909,7 @@
       }).join('');
 
       const lastBedPoint = bdPts.length ? bdPts[bdPts.length - 1] : null;
-      let bedDisplay = d.avg_bed || lastBedPoint?.raw || targetB_str;
+      let bedDisplay = d.avg_bed || lastBedPoint?.raw || '&mdash;';
       let bedSub = 'Daily Average';
       if (selBedItem && selBedItem.bed) {
         bedDisplay = selBedItem.bed;

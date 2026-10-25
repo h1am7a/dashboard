@@ -1,14 +1,26 @@
 import os
 import pytest
+from pathlib import Path
 from fastapi.testclient import TestClient
 
 # Ensure DEV_MODE is on for testing
 os.environ["DEV_MODE"] = "true"
 
 from app.api import app
-from app import store
+from app import store, config
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def isolated_test_db(tmp_path, monkeypatch):
+    """Isolate every test in an ephemeral clean SQLite database."""
+    test_db = tmp_path / "life.db"
+    monkeypatch.setenv("DB_PATH", str(test_db))
+    monkeypatch.setattr(config, "DB_PATH", str(test_db))
+    with store.session() as con:
+        store.migrate(con)
+
 
 
 def test_health():
@@ -69,6 +81,7 @@ def test_sleep_periods():
 
 
 def test_body():
+    # 1. Clean empty database state
     res = client.get("/api/body")
     assert res.status_code == 200
     data = res.json()
@@ -89,16 +102,31 @@ def test_body():
         assert "latest" in m
         assert "delta_cm" in m
         assert "significant" in m
-        assert "history" in m
-
-    waist_m = next(m for m in data["measurements"] if m["kind"] == "waist")
-    assert len(waist_m["history"]) == 9
-    biceps_m = next(m for m in data["measurements"] if m["kind"] == "biceps_r")
-    assert len(biceps_m["history"]) == 5
-    forearm_m = next(m for m in data["measurements"] if m["kind"] == "forearm_r")
-    assert len(forearm_m["history"]) == 5
+        assert isinstance(m["history"], list)
 
     assert "workouts" in data
+
+    # 2. Populated measurement state verification
+    for i in range(9):
+        store.add_metric("waist", 82.0 - i * 0.2, ts=f"2026-09-{i+1:02d}")
+    for i in range(5):
+        store.add_metric("biceps_r", 37.0 + i * 0.1, ts=f"2026-09-{i+1:02d}")
+        store.add_metric("forearm_r", 30.0 + i * 0.1, ts=f"2026-09-{i+1:02d}")
+
+    res_pop = client.get("/api/body")
+    assert res_pop.status_code == 200
+    data_pop = res_pop.json()
+
+    waist_m = next(m for m in data_pop["measurements"] if m["kind"] == "waist")
+    assert len(waist_m["history"]) == 9
+    assert waist_m["latest"] == 80.4
+    assert waist_m["delta_cm"] == -1.6
+
+    biceps_m = next(m for m in data_pop["measurements"] if m["kind"] == "biceps_r")
+    assert len(biceps_m["history"]) == 5
+
+    forearm_m = next(m for m in data_pop["measurements"] if m["kind"] == "forearm_r")
+    assert len(forearm_m["history"]) == 5
 
 
 def test_task_done_flow():
