@@ -7,7 +7,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Database path
-PRIEST_DB = os.getenv("PRIEST_DB", str(BASE_DIR / "db" / "life.db"))
+DB_PATH = os.getenv("DB_PATH", str(BASE_DIR / "db" / "life.db"))
 
 # Auth & Telegram
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")

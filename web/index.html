@@ -378,12 +378,16 @@
           if (!item) {
             return `<div style="width: 100%; aspect-ratio: 1; border-radius: 2px; background: transparent;"></div>`;
           }
+          const isToday = item.day === d.day;
+          const hasWorkout = Boolean(item.has_workout);
+          const ringStyle = (isToday && hasWorkout) ? 'box-shadow: 0 0 0 1px #FFFFFF;' : '';
+          const workoutDot = hasWorkout ? `<div style="width: 3.5px; height: 3.5px; border-radius: 50%; background: #8E8E93;"></div>` : '';
+
           if (item.percent === null) {
-            return `<div title="No data" style="width: 100%; aspect-ratio: 1; border-radius: 2px; background: transparent; border: 0.5px dashed var(--separator);"></div>`;
+            return `<div title="${item.day}: No data" style="width: 100%; aspect-ratio: 1; border-radius: 2px; background: transparent; border: 0.5px solid var(--separator); display: flex; align-items: center; justify-content: center; ${ringStyle}">${workoutDot}</div>`;
           }
           const bg = getHeatmapColor(item.percent);
-          const workoutDot = item.has_workout ? `<div style="width: 3.5px; height: 3.5px; border-radius: 50%; background: rgba(0,0,0,0.5);"></div>` : '';
-          return `<div title="${item.day}: ${item.percent}%" style="width: 100%; aspect-ratio: 1; border-radius: 2px; background: ${bg}; display: flex; align-items: center; justify-content: center;">${workoutDot}</div>`;
+          return `<div title="${item.day}: ${item.percent}%" style="width: 100%; aspect-ratio: 1; border-radius: 2px; background: ${bg}; display: flex; align-items: center; justify-content: center; ${ringStyle}">${workoutDot}</div>`;
         }).join('');
 
         return `<div style="flex: 1; display: flex; flex-direction: column; gap: 3px;">${cellsHtml}</div>`;
@@ -425,7 +429,6 @@
                   </span>
                   <span class="${it.done ? 'text-[var(--label-primary)]' : 'text-[var(--label-secondary)]'}">${it.title}</span>
                 </div>
-                <span class="text-[10px] font-medium text-[var(--label-tertiary)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 rounded-full">habit</span>
               </div>
             `;
           } else {
@@ -518,7 +521,7 @@
             </div>
 
             <div class="flex items-center justify-between pt-1.5 border-t border-[var(--separator)] text-[8px] text-[var(--label-secondary)]">
-              <span class="flex items-center gap-1"><span style="width: 6.5px; height: 6.5px; border-radius: 1.5px; border: 0.5px dashed var(--separator); flex-shrink: 0;"></span> none</span>
+              <span class="flex items-center gap-1"><span style="width: 6.5px; height: 6.5px; border-radius: 1.5px; border: 0.5px solid var(--separator); flex-shrink: 0;"></span> none</span>
               <span class="flex items-center gap-1"><span style="width: 6.5px; height: 6.5px; border-radius: 1.5px; background: rgba(255,255,255,0.08); flex-shrink: 0;"></span> 0</span>
               <span class="flex items-center gap-1"><span style="width: 6.5px; height: 6.5px; border-radius: 1.5px; background: rgba(255,255,255,0.28); flex-shrink: 0;"></span> 1&ndash;49</span>
               <span class="flex items-center gap-1"><span style="width: 6.5px; height: 6.5px; border-radius: 1.5px; background: rgba(255,255,255,0.55); flex-shrink: 0;"></span> 50&ndash;74</span>
@@ -622,24 +625,39 @@
       const barWidth = seriesCount === 7 ? 24 : (seriesCount === 30 ? 5 : 16);
       const gap = seriesCount > 0 ? (svgW - (seriesCount * barWidth)) / (seriesCount + 1) : 0;
 
+      const dayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
       const barsHtml = (d.series || []).map((item, idx) => {
         const x = gap + idx * (barWidth + gap);
-        if (item.hours === null || item.hours === undefined) {
-          return `<rect x="${x}" y="${padTop + plotH - 2}" width="${barWidth}" height="2" fill="rgba(255,255,255,0.06)" rx="1"/>`;
+        let labelText = '';
+        if (item.day) {
+          if (seriesCount <= 7) {
+            const dt = new Date(item.day + 'T00:00:00');
+            labelText = dayLetters[dt.getDay()];
+          } else if (idx % 7 === 0) {
+            labelText = item.day.split('-')[2];
+          }
         }
+
+        const labelSvg = labelText ? `<text x="${x + barWidth/2}" y="${svgH - 6}" font-size="9" fill="var(--label-secondary)" text-anchor="middle" font-weight="500">${labelText}</text>` : '';
+
+        if (item.hours === null || item.hours === undefined) {
+          return `
+            <g class="chart-bar-clickable" onclick="handleBarClick('sleep', ${idx}, event)">
+              ${labelSvg}
+            </g>
+          `;
+        }
+
         const clampedHours = Math.max(yMinS, Math.min(yMaxS, item.hours));
         const barH = ((clampedHours - yMinS) / (yMaxS - yMinS)) * plotH;
         const y = padTop + plotH - barH;
         const isSelected = activeBarSelection && activeBarSelection.chart === 'sleep' && activeBarSelection.index === idx;
         const fillColor = isSelected ? 'var(--chart-neutral-active)' : 'var(--chart-neutral)';
 
-        const dayNum = item.day ? item.day.split('-')[2] : '';
-        const labelText = seriesCount <= 7 ? ['M','T','W','T','F','S','S'][idx % 7] : (idx % 7 === 0 ? dayNum : '');
-
         return `
           <g class="chart-bar-clickable" onclick="handleBarClick('sleep', ${idx}, event)">
             <rect x="${x}" y="${y}" width="${barWidth}" height="${barH}" fill="${fillColor}" rx="${barWidth > 10 ? 4 : 2}"/>
-            ${labelText ? `<text x="${x + barWidth/2}" y="${svgH - 6}" font-size="9" fill="var(--label-secondary)" text-anchor="middle" font-weight="500">${labelText}</text>` : ''}
+            ${labelSvg}
           </g>
         `;
       }).join('');
@@ -774,6 +792,11 @@
       }
 
       try {
+        if (!cachedToday) {
+          try {
+            cachedToday = await apiRequest('/api/today');
+          } catch (e) {}
+        }
         const d = await apiRequest('/api/body');
         cachedBody = d;
         renderBody(d);
@@ -847,15 +870,19 @@
         `;
       }).join('');
 
-      // Workouts week strip (last 7 days)
+      // Workouts week strip (last 7 days, aligned with Moscow logical day from /api/today)
       const dayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-      const todayIso = new Date().toISOString().substring(0, 10);
+      const todayIso = (cachedToday && cachedToday.day) ? cachedToday.day : new Date().toISOString().substring(0, 10);
+      const baseDate = new Date(todayIso + 'T00:00:00');
       const workoutsList = d.workouts || [];
 
       const workoutDays = Array.from({ length: 7 }, (_, i) => {
-        const dObj = new Date();
-        dObj.setDate(dObj.getDate() - (6 - i));
-        const iso = dObj.toISOString().substring(0, 10);
+        const dObj = new Date(baseDate);
+        dObj.setDate(baseDate.getDate() - (6 - i));
+        const y = dObj.getFullYear();
+        const m = String(dObj.getMonth() + 1).padStart(2, '0');
+        const dt = String(dObj.getDate()).padStart(2, '0');
+        const iso = `${y}-${m}-${dt}`;
         const wo = workoutsList.find(w => w.date === iso);
         return {
           dayLetter: dayLetters[dObj.getDay()],

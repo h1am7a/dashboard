@@ -36,6 +36,8 @@ def test_today():
     assert "mood" in data
     assert "hitmap" in data
     assert len(data["hitmap"]) == 126
+    assert "has_workout" in data["hitmap"][0]
+    assert isinstance(data["hitmap"][0]["has_workout"], bool)
 
 
 def test_sleep_periods():
@@ -124,3 +126,11 @@ def test_auth_protection():
             os.environ["DEV_MODE"] = orig_dev
         if orig_user is not None:
             os.environ["DEV_USER_ID"] = orig_user
+
+
+def test_config_db_path_and_no_logic():
+    from app import config
+    from pathlib import Path
+    assert hasattr(config, "DB_PATH")
+    assert not hasattr(config, "PRIEST_DB")
+    assert not (Path(__file__).parent.parent / "app" / "logic.py").exists()

@@ -3,7 +3,7 @@
 Единая точка правды для БД: и CLI (bin/life.py), и будущее Telegram-приложение
 ходят в базу только через эти функции. Никаких ручных INSERT'ов.
 
-Путь к БД: $PRIEST_DB или <workspace>/db/life.db
+Путь к БД: $DB_PATH или <workspace>/db/life.db
 """
 from __future__ import annotations
 
@@ -195,7 +195,7 @@ FROM (SELECT DISTINCT ts AS day FROM metrics UNION SELECT DISTINCT date FROM wor
 
 
 def db_path() -> Path:
-    return Path(os.environ.get("DB_PATH") or os.environ.get("PRIEST_DB") or (WORKSPACE / "db" / "life.db"))
+    return Path(os.environ.get("DB_PATH") or (WORKSPACE / "db" / "life.db"))
 
 
 def connect(path: Path | str | None = None) -> sqlite3.Connection:
@@ -596,11 +596,14 @@ def day_score(day: str | None = None) -> dict:
 def hitmap(days: int = 84) -> list[dict]:
     """Хитмап: процент выполнения по дням, от старых к новым. total=0 → нет данных."""
     end = date_cls.fromisoformat(_today())
+    with session() as c:
+        wdays = {r["date"] for r in c.execute("SELECT DISTINCT date FROM workouts")}
     out = []
     for i in range(days - 1, -1, -1):
         d = (end - timedelta(days=i)).isoformat()
         s = day_score(d)
-        out.append({"day": d, "done": s["done"], "total": s["total"], "percent": s["percent"]})
+        out.append({"day": d, "done": s["done"], "total": s["total"], "percent": s["percent"],
+                    "has_workout": d in wdays})
     return out
 
 
