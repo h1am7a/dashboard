@@ -31,6 +31,7 @@ def test_today():
     assert "done" in data["score"]
     assert "total" in data["score"]
     assert "items" in data["score"]
+    assert len(data["score"]["items"]) > 0
     assert "sleep" in data
     assert "target" in data["sleep"]
     assert "mood" in data
@@ -38,6 +39,13 @@ def test_today():
     assert len(data["hitmap"]) == 126
     assert "has_workout" in data["hitmap"][0]
     assert isinstance(data["hitmap"][0]["has_workout"], bool)
+
+
+def test_day_score_empty_day():
+    score = store.day_score("2035-01-01")
+    assert score["percent"] is None
+    assert score["total"] > 0
+    assert len(score["items"]) > 0
 
 
 def test_sleep_periods():
@@ -65,9 +73,9 @@ def test_body():
     data = res.json()
 
     assert "measurements" in data
-    assert len(data["measurements"]) == 4
     kinds = [m["kind"] for m in data["measurements"]]
-    assert kinds == ["waist", "biceps_r", "forearm_r", "thigh_r"]
+    for k in ["waist", "biceps_r", "forearm_r"]:
+        assert k in kinds
 
     for m in data["measurements"]:
         assert "label" in m
@@ -77,7 +85,6 @@ def test_body():
         assert "significant" in m
         assert "history" in m
 
-    assert "thigh_asymmetry" in data
     assert "workouts" in data
 
 

@@ -50,6 +50,16 @@
   padding: 0;
 }
 
+/* Tailwind-преflight убрали — базовый сброс для элементов форм нужен свой */
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 body {
   background-color: var(--bg-system);
   color: var(--label-primary);

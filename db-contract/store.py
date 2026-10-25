@@ -229,7 +229,7 @@ def migrate(con: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass
     old = int(cur["value"]) if cur else 0
-    if old < SCHEMA_VERSION:
+    if not cur or old < SCHEMA_VERSION:
         con.executescript(DDL)
         con.executescript("DROP VIEW IF EXISTS v_daily;")
         seed_habits(con)
@@ -584,13 +584,12 @@ def day_score(day: str | None = None) -> dict:
         has_data = bool(c.execute(
             "SELECT (SELECT COUNT(*) FROM metrics WHERE ts=?) + (SELECT COUNT(*) FROM workouts WHERE date=?) n",
             (day, day)).fetchone()["n"])
-    if not has_data:
-        return {"day": day, "done": 0, "total": 0, "percent": None, "items": []}
     total = len(items)
     done = sum(1 for i in items if i["done"])
-    return {"day": day, "done": done, "total": total,
-            "percent": round(100 * done / total) if total else None,
-            "items": items}
+    # нет записей за день — процент неизвестен, но сами якоря показываем:
+    # иначе чеклист пропадает и отметить пункт нечем
+    percent = round(100 * done / total) if (total and has_data) else None
+    return {"day": day, "done": done, "total": total, "percent": percent, "items": items}
 
 
 def hitmap(days: int = 84) -> list[dict]:
