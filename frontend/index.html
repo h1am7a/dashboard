@@ -55,9 +55,13 @@
     body {
       background-color: #000000;
       color: var(--label-primary);
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "SF Pro", system-ui, sans-serif;
+      font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
       overflow-x: hidden;
       touch-action: pan-y;
+    }
+
+    svg text {
+      font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif !important;
     }
 
     .sf-display {
@@ -402,17 +406,15 @@
         return `<div style="flex: 1; display: flex; flex-direction: column; gap: 3px;">${cellsHtml}</div>`;
       }).join('');
 
-      // Month label above the first week of that month
+      // Month label above the week containing the 1st of the month (prevents collision like 'Jun Jul')
       const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      let lastMonth = -1;
       const monthLabels = weeks.map((week, idx) => {
         let label = '';
         for (const item of week) {
           if (!item) continue;
-          const dObj = new Date(item.day + 'T00:00:00');
-          const m = dObj.getMonth();
-          if (m !== lastMonth) {
-            lastMonth = m;
+          if (item.day && item.day.endsWith('-01')) {
+            const dObj = new Date(item.day + 'T00:00:00');
+            const m = dObj.getMonth();
             const isLatest = idx >= weeks.length - 3;
             label = `<span class="truncate ${isLatest ? 'text-[var(--label-primary)] font-bold' : ''}">${monthNames[m]}</span>`;
             break;
@@ -494,15 +496,9 @@
 
       container.innerHTML = `
         <!-- Today Header -->
-        <div class="flex items-baseline justify-between pt-1">
-          <div>
-            <h1 class="text-3xl font-bold tracking-tight text-[var(--label-primary)] sf-display">${d.weekday}</h1>
-            <div class="text-xs text-[var(--label-secondary)] mt-0.5">${dateFormatted}</div>
-          </div>
-          <div class="text-right">
-            <div class="text-2xl font-bold text-[var(--label-primary)] num leading-tight">${scoreStr}</div>
-            <div class="text-[10px] font-semibold tracking-wider uppercase text-[var(--label-secondary)] mt-0.5">${statusText}</div>
-          </div>
+        <div class="pt-1">
+          <h1 class="text-3xl font-bold tracking-tight text-[var(--label-primary)] sf-display">${d.weekday}</h1>
+          <div class="text-xs text-[var(--label-secondary)] mt-0.5">${dateFormatted}</div>
         </div>
 
         <!-- Activity Pulse Heatmap -->
@@ -730,15 +726,9 @@
 
       container.innerHTML = `
         <!-- Sleep Header -->
-        <div class="flex items-baseline justify-between pt-1">
-          <div>
-            <h1 class="text-3xl font-bold tracking-tight text-[var(--label-primary)] sf-display">Sleep</h1>
-            <div class="text-xs text-[var(--label-secondary)] mt-0.5">Duration and schedule</div>
-          </div>
-          <div class="text-right">
-            <div class="text-2xl font-bold text-[var(--label-primary)] num leading-tight">${d.avg_hours ? d.avg_hours + 'h' : '&mdash;'}</div>
-            <div class="mt-0.5">${prevWeekBadge}</div>
-          </div>
+        <div class="pt-1">
+          <h1 class="text-3xl font-bold tracking-tight text-[var(--label-primary)] sf-display">Sleep</h1>
+          <div class="text-xs text-[var(--label-secondary)] mt-0.5">Duration and schedule</div>
         </div>
 
         <!-- Period Switcher: 7 Days / 30 Days / 90 Days -->
@@ -820,19 +810,49 @@
     function renderBody(d) {
       const container = document.getElementById('screen-body');
 
+      function generateSmoothSpline(pts) {
+        if (pts.length === 0) return '';
+        if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
+        let path = `M ${pts[0].x} ${pts[0].y}`;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const p0 = i > 0 ? pts[i - 1] : pts[i];
+          const p1 = pts[i];
+          const p2 = pts[i + 1];
+          const p3 = i < pts.length - 2 ? pts[i + 2] : p2;
+          const cp1x = p1.x + (p2.x - p0.x) / 6;
+          const cp1y = p1.y + (p2.y - p0.y) / 6;
+          const cp2x = p2.x - (p3.x - p1.x) / 6;
+          const cp2y = p2.y - (p3.y - p1.y) / 6;
+          path += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+        }
+        return path;
+      }
+
       function generateSparkline(vals, w = 120, h = 28) {
-        if (!vals || vals.length < 2) {
+        if (!vals || vals.length === 0) {
           return `<line x1="0" y1="${h/2}" x2="${w}" y2="${h/2}" stroke="var(--chart-grid)" stroke-width="1" stroke-dasharray="2 2"/>`;
+        }
+        if (vals.length === 1) {
+          const x = w / 2;
+          const y = h / 2;
+          return `<circle cx="${x}" cy="${y}" r="3" fill="var(--chart-neutral)" stroke="var(--bg-secondary)" stroke-width="1.5"/>`;
         }
         const min = Math.min(...vals);
         const max = Math.max(...vals);
         const range = (max - min) || 1;
         const pts = vals.map((v, i) => {
-          const x = (i / (vals.length - 1)) * w;
-          const y = h - 4 - ((v - min) / range) * (h - 8);
-          return `${x.toFixed(1)},${y.toFixed(1)}`;
-        }).join(' ');
-        return `<polyline fill="none" stroke="var(--chart-neutral)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" points="${pts}"/>`;
+          const x = 6 + (i / (vals.length - 1)) * (w - 12);
+          const y = h - 6 - ((v - min) / range) * (h - 12);
+          return { x, y };
+        });
+        const pathD = generateSmoothSpline(pts);
+        const dotsHtml = pts.map(p =>
+          `<circle cx="${p.x}" cy="${p.y}" r="3" fill="var(--chart-neutral)" stroke="var(--bg-secondary)" stroke-width="1.5"/>`
+        ).join('');
+        return `
+          <path d="${pathD}" fill="none" stroke="var(--chart-neutral)" stroke-width="2" stroke-linecap="round"/>
+          ${dotsHtml}
+        `;
       }
 
       function renderMeasurementCard(m, isWide = false) {
@@ -901,34 +921,33 @@
       const stripHtml = workoutDays.map((wDay, idx) => {
         const isSelected = selectedWorkoutDayIndex === idx;
         const hasWo = !!wDay.workout;
-        let dotClass = 'border border-[var(--separator)] bg-transparent';
-        if (hasWo) dotClass = 'bg-[var(--label-primary)]';
+
+        let circleClass = 'border border-[var(--separator)] text-transparent';
+        if (hasWo) {
+          circleClass = isSelected ? 'bg-white text-black font-bold shadow-sm' : 'bg-[var(--chart-neutral)] text-black font-bold shadow-sm';
+        } else if (isSelected) {
+          circleClass = 'border-2 border-white text-transparent';
+        }
 
         return `
           <div onclick="selectWorkoutDay(${idx})" class="flex-1 flex flex-col items-center gap-1.5 cursor-pointer">
-            <span class="text-[10px] ${isSelected ? 'text-white font-bold' : 'text-[var(--label-secondary)] font-medium'}">${wDay.dayLetter}</span>
-            <div class="w-6 h-6 rounded-full flex items-center justify-center ${isSelected ? 'ring-2 ring-white ring-offset-2 ring-offset-black' : ''}">
-              <div class="w-2.5 h-2.5 rounded-full ${dotClass}"></div>
+            <span class="text-[11px] ${isSelected ? 'text-white font-bold' : (hasWo ? 'text-[var(--label-primary)]' : 'text-[var(--label-secondary)]')}">${wDay.dayLetter}</span>
+            <div class="w-6 h-6 rounded-full flex items-center justify-center text-[10px] ${circleClass}">
+              ${hasWo ? '&#10003;' : ''}
             </div>
           </div>
         `;
       }).join('');
 
       const selDay = workoutDays[selectedWorkoutDayIndex] || workoutDays[6];
-      let detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-2 text-center">No workout logged for this day (Rest day).</div>';
+      let detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-2 text-center">No workout scheduled for this day</div>';
       if (selDay && selDay.workout) {
         const w = selDay.workout;
-        detailHtml = `
-          <div class="space-y-2 pt-1 text-xs">
-            <div class="flex items-center justify-between">
-              <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[rgba(255,255,255,0.08)] text-[var(--label-primary)] uppercase">${w.kind} &bull; ${w.load}</span>
-              <span class="text-[var(--label-secondary)] num font-medium">${w.duration_min} min</span>
-            </div>
-            ${w.note ? `<div class="text-[var(--label-primary)] font-normal leading-relaxed">${w.note}</div>` : ''}
-          </div>
-        `;
+        detailHtml = w.note
+          ? `<div class="text-[var(--label-primary)] font-normal leading-relaxed text-xs pt-1">${w.note}</div>`
+          : '<div class="text-xs text-[var(--label-secondary)] py-1">Workout completed</div>';
       } else if (workoutsList.length === 0) {
-        detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-2 text-center">No workouts logged yet.</div>';
+        detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-2 text-center">No workouts logged yet</div>';
       }
 
       container.innerHTML = `
@@ -953,7 +972,7 @@
         <div class="ios-widget-card space-y-3">
           <div class="flex items-center justify-between">
             <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Weekly Workouts</span>
-            <span class="text-xs text-[var(--label-tertiary)]">${selDay ? selDay.date : ''}</span>
+            <span class="text-xs text-[var(--label-tertiary)]">${selDay ? new Date(selDay.date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : ''}</span>
           </div>
           <div class="flex justify-between items-center py-1">
             ${stripHtml}
