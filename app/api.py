@@ -120,8 +120,8 @@ def _parse_time_str_or_float(val: str | float | int | None) -> tuple[int, str] |
     return None, None
 
 
-def _wake_target() -> tuple[int, str]:
-    """Цель подъёма из facts (wake_target/target_wake): (минуты от полуночи, 'HH:MM')."""
+def _wake_target() -> tuple[int | None, str | None]:
+    """Цель подъёма из facts (wake_target/target_wake): (минуты от полуночи, 'HH:MM') или (None, None)."""
     with store.session() as c:
         row = c.execute(
             "SELECT value FROM facts WHERE key IN ('wake_target', 'target_wake') "
@@ -131,11 +131,11 @@ def _wake_target() -> tuple[int, str]:
         mins, s = _parse_time_str_or_float(row["value"])
         if mins is not None and s is not None:
             return mins, s
-    return 7 * 60 + 30, "07:30"
+    return None, None
 
 
-def _bed_target() -> str:
-    """Цель отбоя из facts (bed_target/target_bed): 'HH:MM'."""
+def _bed_target() -> str | None:
+    """Цель отбоя из facts (bed_target/target_bed): 'HH:MM' или None."""
     with store.session() as c:
         row = c.execute(
             "SELECT value FROM facts WHERE key IN ('bed_target', 'target_bed') "
@@ -146,55 +146,29 @@ def _bed_target() -> str:
         if s is not None:
             return s
         return str(row["value"])
-    return "23:30"
+    return None
 
 
-def _sleep_target() -> float:
-    """Цель сна из facts (sleep_target/target_hours) или habits: количество часов (float)."""
+def _sleep_target() -> float | None:
+    """Цель сна из facts (sleep_target): количество часов (float) или None."""
     with store.session() as c:
-        keys = ("sleep_target", "sleep_target_hours", "target_sleep", "target_hours", "sleep_hours_target", "sleep_hours")
-        placeholders = ",".join("?" for _ in keys)
         row = c.execute(
-            f"SELECT key, value FROM facts WHERE key IN ({placeholders}) "
+            "SELECT value FROM facts WHERE key IN ('sleep_target', 'sleep_target_hours', 'target_sleep', 'target_hours') "
             "ORDER BY CASE key "
             "WHEN 'sleep_target' THEN 1 "
             "WHEN 'sleep_target_hours' THEN 2 "
             "WHEN 'target_sleep' THEN 3 "
             "WHEN 'target_hours' THEN 4 "
-            "ELSE 5 END LIMIT 1",
-            keys,
+            "ELSE 5 END LIMIT 1"
         ).fetchone()
-        if row and row["value"]:
-            try:
-                val = float(str(row["value"]).replace(",", "."))
-                if 0 < val <= 24:
-                    return val
-            except ValueError:
-                pass
-
-        hrow = c.execute(
-            "SELECT rule FROM habits WHERE (key LIKE '%sleep%' OR rule LIKE '%sleep_hours%') "
-            "ORDER BY sort LIMIT 1"
-        ).fetchone()
-        if hrow and hrow["rule"]:
-            try:
-                rule = json.loads(hrow["rule"])
-                if rule.get("kind") == "sleep_hours" and "value" in rule:
-                    return float(rule["value"])
-            except Exception:
-                pass
-
-        w_row = c.execute("SELECT value FROM facts WHERE key IN ('wake_target', 'target_wake') LIMIT 1").fetchone()
-        b_row = c.execute("SELECT value FROM facts WHERE key IN ('bed_target', 'target_bed') LIMIT 1").fetchone()
-        if w_row and b_row and w_row["value"] and b_row["value"]:
-            w_min, _ = _parse_time_str_or_float(w_row["value"])
-            b_min, _ = _parse_time_str_or_float(b_row["value"])
-            if w_min is not None and b_min is not None:
-                diff_min = (w_min - b_min) % (24 * 60)
-                if diff_min > 0:
-                    return round(diff_min / 60, 1)
-
-    return 7.5
+    if row and row["value"]:
+        try:
+            val = float(str(row["value"]).replace(",", "."))
+            if 0 < val <= 24:
+                return val
+        except ValueError:
+            pass
+    return None
 
 
 def _mood_label(value) -> str | None:
@@ -370,7 +344,7 @@ def sleep(
     avg_bed_str = _format_min(cur_bed_avg)
 
     target_min, target_str = _wake_target()
-    avg_delta = int(round(cur_wake_avg - target_min)) if cur_wake_avg is not None else None
+    avg_delta = int(round(cur_wake_avg - target_min)) if (cur_wake_avg is not None and target_min is not None) else None
 
     return {
         "period": {"from": start.isoformat(), "to": end.isoformat(), "days": days},

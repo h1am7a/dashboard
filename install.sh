@@ -65,8 +65,14 @@ echo -e "${C_CYAN}[*] Step 2/6: Setting up project repository in ${INSTALL_DIR}.
 mkdir -p "$(dirname "$INSTALL_DIR")"
 if [ -d "$INSTALL_DIR/.git" ]; then
   echo "    Repository exists, updating to latest main..."
+  if [ -f "$INSTALL_DIR/.env" ]; then
+    cp -p "$INSTALL_DIR/.env" "$INSTALL_DIR/.env.bak"
+  fi
   git -C "$INSTALL_DIR" fetch origin main -q
   git -C "$INSTALL_DIR" reset --hard origin/main -q
+  if [ ! -f "$INSTALL_DIR/.env" ] && [ -f "$INSTALL_DIR/.env.bak" ]; then
+    cp -p "$INSTALL_DIR/.env.bak" "$INSTALL_DIR/.env"
+  fi
 else
   git clone -q "$REPO_URL" "$INSTALL_DIR"
 fi

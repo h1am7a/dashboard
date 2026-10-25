@@ -191,7 +191,25 @@ def test_static_assets():
 
 
 def test_dynamic_facts_and_habits_titles_and_targets():
-    # 1. Test custom facts for wake, bed, and sleep targets
+    # 1. When facts has no targets, API returns null (None)
+    res_sleep_empty = client.get("/api/sleep?days=7")
+    assert res_sleep_empty.status_code == 200
+    s_empty = res_sleep_empty.json()
+    assert s_empty["target_wake"] is None
+    assert s_empty["target_bed"] is None
+    assert s_empty["target_hours"] is None
+    assert s_empty["avg_delta_min"] is None
+
+    res_today_empty = client.get("/api/today")
+    assert res_today_empty.status_code == 200
+    t_empty = res_today_empty.json()
+    assert t_empty["sleep"]["target"] is None
+    assert t_empty["sleep"]["target_wake"] is None
+    assert t_empty["sleep"]["target_bed"] is None
+    assert t_empty["sleep"]["target_hours"] is None
+    assert t_empty["sleep"]["delta_min"] is None
+
+    # 2. When facts has targets, API returns exactly what is in database
     store.set_fact("wake_target", "08:15")
     store.set_fact("bed_target", "00:30")
     store.set_fact("sleep_target", "8.0")
@@ -211,7 +229,7 @@ def test_dynamic_facts_and_habits_titles_and_targets():
     assert today_data["sleep"]["target_bed"] == "00:30"
     assert today_data["sleep"]["target_hours"] == 8.0
 
-    # 2. Test custom habit title in database reflects in today items
+    # 3. Test custom habit title in database reflects in today items
     with store.session() as con:
         con.execute(
             "INSERT INTO habits(key, title, rule, active_from, sort) "
