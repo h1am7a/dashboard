@@ -287,10 +287,10 @@
       }
     }
 
-    function triggerHaptic(style) {
-      if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
+    function triggerHaptic(style = 'light') {
+      if (window.Telegram?.WebApp?.HapticFeedback) {
         try {
-          window.Telegram.WebApp.HapticFeedback.impactOccurred(style || 'light');
+          window.Telegram.WebApp.HapticFeedback.impactOccurred(style);
         } catch (e) {}
       }
     }
@@ -484,7 +484,7 @@
         itemsHtml = d.score.items.map(it => {
           if (it.type === 'habit') {
             return `
-              <div class="flex items-center justify-between p-3 rounded-2xl bg-[var(--bg-tertiary)] text-xs border border-[var(--separator)]">
+              <div onclick="triggerHaptic('light')" class="flex items-center justify-between p-3 rounded-2xl bg-[var(--bg-tertiary)] text-xs border border-[var(--separator)] cursor-pointer active:opacity-80 transition-opacity">
                 <div class="flex items-center gap-3">
                   <span class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${it.done ? 'bg-[var(--label-primary)] text-[var(--bg-system)]' : 'border border-dashed border-[var(--label-tertiary)]'}">
                     ${it.done ? '&#10003;' : ''}
@@ -496,7 +496,7 @@
           } else {
             const taskId = it.key.replace('task:', '');
             return `
-              <div id="task-${taskId}" class="flex items-center justify-between p-3 rounded-2xl bg-[var(--bg-tertiary)] text-xs border border-[var(--separator)]">
+              <div id="task-${taskId}" onclick="triggerHaptic('light')" class="flex items-center justify-between p-3 rounded-2xl bg-[var(--bg-tertiary)] text-xs border border-[var(--separator)] cursor-pointer active:opacity-80 transition-opacity">
                 <div class="flex items-center gap-3">
                   <span class="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${it.done ? 'bg-[var(--accent-green)] text-black' : 'border border-[var(--label-tertiary)]'}">
                     ${it.done ? '&#10003;' : ''}
@@ -506,7 +506,7 @@
                 <div>
                   ${it.done ?
                     '<span class="text-[11px] font-semibold text-[var(--accent-green)]">Completed</span>' :
-                    `<button onclick="markTaskDone(${taskId})" class="px-3 py-1 rounded-full text-xs font-bold bg-[var(--accent-blue)] text-white shadow-sm active:scale-95 transition-transform">Done</button>`
+                    `<button onclick="markTaskDone(${taskId}, event)" class="px-3 py-1 rounded-full text-xs font-bold bg-[var(--accent-blue)] text-white shadow-sm active:scale-95 transition-transform">Done</button>`
                   }
                 </div>
               </div>
@@ -597,7 +597,10 @@
             </div>
             <div>
               <div class="text-2xl font-bold tracking-tight text-[var(--label-primary)] num">${d.sleep?.hours !== null && d.sleep?.hours !== undefined ? formatDuration(d.sleep.hours) : '&mdash;'}</div>
-              <div class="text-[11px] text-[var(--label-secondary)] font-medium mt-0.5">${d.sleep?.bed || '&mdash;'} <span class="text-white font-semibold">&rarr; ${d.sleep?.wake || '&mdash;'}</span></div>
+              <div class="flex items-baseline justify-between text-[11px] font-medium mt-0.5">
+                <span class="text-white font-semibold">${d.sleep?.wake ? `&rarr; ${d.sleep.wake}` : '&mdash;'}</span>
+                <span class="text-[var(--label-secondary)]">${d.sleep?.bed || '&mdash;'}</span>
+              </div>
             </div>
           </div>
 
@@ -1382,7 +1385,7 @@
     }
 
     function selectPeriod(days) {
-      triggerHaptic('selectionChanged');
+      triggerHaptic('light');
       loadSleepScreen(days);
     }
 
@@ -1434,14 +1437,15 @@
     }
 
     function selectWorkoutDay(idx) {
-      triggerHaptic('selectionChanged');
+      triggerHaptic('light');
       selectedWorkoutDayIndex = idx;
       if (cachedBody) {
         renderBody(cachedBody);
       }
     }
 
-    async function markTaskDone(taskId) {
+    async function markTaskDone(taskId, event) {
+      if (event) event.stopPropagation();
       triggerHaptic('medium');
       const taskEl = document.getElementById(`task-${taskId}`);
       if (taskEl) {
