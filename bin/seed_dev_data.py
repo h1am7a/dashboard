@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Generate realistic 30-day development test data for local dashboard testing."""
-import os
+"""Generate realistic development test data for local dashboard testing."""
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -8,7 +7,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-from app import store, logic
+from app import store
 
 
 def seed():
@@ -17,29 +16,31 @@ def seed():
     db_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Set baseline facts
-    store.set_fact("city", "Moscow")
-    store.set_fact("wake_target", "14:30")
+    store.set_fact("city", "London")
+    store.set_fact("wake_target", "07:30")
+    store.set_fact("bed_target", "23:30")
     store.set_fact("user_name", "user")
 
     # Current logical day
-    today_str = logic.get_logical_day()
+    today_str = store._today()
     curr_date = date.fromisoformat(today_str)
 
-    # Generate 30 days of history
+    # Generate 30 days of sleep & habit history
     for i in range(30, -1, -1):
         day_date = curr_date - timedelta(days=i)
         iso_day = day_date.isoformat()
 
         # 1. Sleep & schedule
-        drift_factor = (30 - i) * 0.04
-        wake_val = round(14.2 + drift_factor + ((i % 3) * 0.1), 2)
-        bed_val = round(6.8 + drift_factor + ((i % 2) * 0.15), 2)
-        sleep_hours = round(7.0 + ((i % 4) * 0.4) - ((i % 5) * 0.2), 1)
+        wake_m = 20 + (i % 20)
+        wake_val = f"07:{wake_m:02d}"
+        bed_m = 15 + (i % 30)
+        bed_val = f"23:{bed_m:02d}"
+        sleep_hours = round(7.4 + ((i % 5) * 0.2) - ((i % 3) * 0.1), 1)
 
         store.add_metric("wake_time", wake_val, ts=iso_day, note="wake")
         store.add_metric("bed_time", bed_val, ts=iso_day, note="bed")
         store.add_metric("sleep_hours", sleep_hours, ts=iso_day)
-        store.add_metric("sleep_quality", 4 if sleep_hours >= 7 else 3, ts=iso_day)
+        store.add_metric("sleep_quality", 4 if sleep_hours >= 7.5 else 3, ts=iso_day)
 
         # 2. Mood & energy
         mood = 6 + (i % 3)
@@ -47,62 +48,79 @@ def seed():
         store.add_metric("mood", mood, ts=iso_day)
         store.add_metric("energy", energy, ts=iso_day)
 
-        # 3. Masturbation count: 0 almost always, occasionally 1
-        porn_cnt = 1 if (i in (4, 11, 18, 25)) else 0
-        store.add_metric("porn_count", porn_cnt, ts=iso_day)
-
-        # 4. Daily minimum checks
-        store.add_metric("wake_light", 1 if i % 4 != 0 else 0, ts=iso_day)
+        # 3. Daily minimum checks
         store.add_metric("protein_ok", 1 if i % 3 != 0 else 0, ts=iso_day)
         store.add_metric("routine_ok", 1 if i % 2 == 0 else 0, ts=iso_day)
 
-        # 5. Workouts (every 2-3 days)
-        if i % 3 == 1:
-            load = "hard" if i % 2 == 0 else "moderate"
-            duration = 65 if load == "hard" else 55
-            note = "Bench press 3x8 85kg, dumbbell row 34kg 3x10, pull-ups" if load == "hard" else "Full body, moderate tempo, warmup"
-            store.add_workout(date_=iso_day, kind="gym", duration_min=duration, load=load, note=note)
+    # 4. Body measurements: exact intervals (9 for waist, 5 for biceps & forearm)
+    with store.session() as con:
+        con.execute("DELETE FROM metrics WHERE kind IN ('waist', 'biceps_r', 'forearm_r')")
 
-        # 6. Waist & weight (weekly)
-        if i % 7 == 0:
-            waist = round(85.5 - ((30 - i) / 30) * 1.3, 1)
-            weight = round(79.0 - ((30 - i) / 30) * 0.6, 1)
-            store.add_metric("waist", waist, ts=iso_day, note="morning measurement")
-            store.add_metric("weight", weight, ts=iso_day, note="fasting weight")
+    waist_vals = [86.4, 86.0, 85.6, 85.2, 84.8, 84.4, 84.0, 83.6, 83.2]
+    for idx, val in enumerate(waist_vals):
+        pt_date = (curr_date - timedelta(weeks=(8 - idx))).isoformat()
+        store.add_metric("waist", val, ts=pt_date, unit="cm")
 
-        # 7. Screen time (Sundays: 50h, 48h, 41h)
-        if day_date.weekday() == 6:  # Sunday
-            screen_hrs = 41.0 if i < 7 else (50.0 if i < 14 else 48.0)
-            store.add_metric("screen_time", screen_hrs, ts=iso_day, note="weekly total")
+    biceps_vals = [37.2, 37.5, 37.8, 38.2, 38.6]
+    for idx, val in enumerate(biceps_vals):
+        pt_date = (curr_date - timedelta(weeks=(4 - idx))).isoformat()
+        store.add_metric("biceps_r", val, ts=pt_date, unit="cm")
 
-    # 8. Inventory items
-    try:
-        store.add_item("Facial Cleanser", category="hygiene", cadence="daily", role="facial cleansing")
-        store.add_item("Creatine Monohydrate", category="supplement", cadence="daily", role="recovery")
-        store.add_item("Whey Protein", category="supplement", cadence="daily", role="daily protein")
-    except Exception:
-        pass
+    forearm_vals = [30.4, 30.7, 31.0, 31.3, 31.6]
+    for idx, val in enumerate(forearm_vals):
+        pt_date = (curr_date - timedelta(weeks=(4 - idx))).isoformat()
+        store.add_metric("forearm_r", val, ts=pt_date, unit="cm")
 
-    # 9. Tasks
+    # 5. Workouts with clear newline-separated exercises
+    with store.session() as con:
+        con.execute("DELETE FROM workouts")
+
+    store.add_workout(
+        date_=curr_date.isoformat(),
+        kind="gym",
+        duration_min=55,
+        load="moderate",
+        note="Overhead press 4x8 50kg\nDumbbell lateral raises 4x15 12kg\nFace pulls 3x15\nTriceps rope pushdowns 3x12\nHammer curls 3x10 16kg",
+    )
+    store.add_workout(
+        date_=(curr_date - timedelta(days=2)).isoformat(),
+        kind="gym",
+        duration_min=70,
+        load="hard",
+        note="Barbell back squat 4x6 110kg\nRomanian deadlift 3x10 90kg\nBulgarian split squats 3x10\nHanging leg raises 3x15",
+    )
+    store.add_workout(
+        date_=(curr_date - timedelta(days=4)).isoformat(),
+        kind="gym",
+        duration_min=65,
+        load="hard",
+        note="Weighted pull-ups 4x6 (+15kg)\nBarbell bent-over row 4x8 75kg\nSeated cable row 3x12 65kg\nIncline dumbbell curls 3x12 14kg",
+    )
+    store.add_workout(
+        date_=(curr_date - timedelta(days=6)).isoformat(),
+        kind="gym",
+        duration_min=60,
+        load="hard",
+        note="Bench press 4x8 85kg\nIncline dumbbell press 3x10 30kg\nWeighted dips 3x10 (+15kg)\nCable chest flyes 3x15",
+    )
+
+    # 6. Tasks
     with store.session() as con:
         con.execute("DELETE FROM tasks")
-        con.execute("DELETE FROM events")
 
-    store.add_task("Deploy FastAPI backend to VPS", project="tg_app", due=(curr_date + timedelta(days=2)).isoformat(), priority=1)
-    store.add_task("Configure Cloudflare Tunnel / SSL", project="devops", due=(curr_date + timedelta(days=4)).isoformat(), priority=2)
-    store.add_task("Verify sqlite3 WAL backups", project="infra", due=None, priority=3)
-    
-    # Completed tasks
-    t_done1 = store.add_task("Build architecture UI mockup", project="tg_app", priority=1)
-    store.close_task(t_done1, status="done")
-    t_done2 = store.add_task("Design API routes", project="tg_app", priority=2)
-    store.close_task(t_done2, status="done")
+    store.add_task("Check resting heart rate & morning HRV", project="routine", due=curr_date.isoformat(), priority=1)
+    store.add_task("Take post-workout protein shake & creatine", project="routine", due=curr_date.isoformat(), priority=1)
+    store.add_task("Prepare healthy meals for tomorrow", project="routine", due=curr_date.isoformat(), priority=2)
+    # Open task for interactive Done testing
+    store.add_task("Evening screen detox 30m before bed", project="routine", due=curr_date.isoformat(), priority=2)
+    store.add_task("Morning sunlight walk 15 mins", project="routine", due=curr_date.isoformat(), priority=3)
 
-    # 10. Events
-    store.add_event((curr_date + timedelta(days=32)).isoformat(), "VPS Server Renewal", type_="infra", remind="3d")
-    store.add_event((curr_date + timedelta(days=47)).isoformat(), "Domain Renewal", type_="billing", remind="7d")
+    # Mark first 3 as done
+    with store.session() as con:
+        con.execute("UPDATE tasks SET status='done' WHERE id IN (1, 2, 3, 5)")
+        con.execute("UPDATE tasks SET status='open', done_at=NULL WHERE id=4")
 
-    print("Done! Generated realistic 30-day dev metrics.")
+    print("Done! Generated realistic clean dev metrics.")
 
 
 if __name__ == "__main__":

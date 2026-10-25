@@ -75,11 +75,16 @@ def logical_day(now: datetime | None = None) -> str:
     return d.isoformat()
 
 
-def _hhmm(hours: float | None) -> str | None:
+def _hhmm(hours: float | str | None) -> str | None:
     if hours is None:
         return None
-    total = int(round(float(hours) * 60)) % (24 * 60)
-    return f"{total // 60:02d}:{total % 60:02d}"
+    if isinstance(hours, str) and ":" in hours:
+        return hours
+    try:
+        total = int(round(float(hours) * 60)) % (24 * 60)
+        return f"{total // 60:02d}:{total % 60:02d}"
+    except (ValueError, TypeError):
+        return str(hours)
 
 
 def _wake_target() -> tuple[int, str]:
@@ -93,6 +98,12 @@ def _wake_target() -> tuple[int, str]:
     else:
         minutes = 14 * 60 + 30
     return minutes, f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _bed_target() -> str:
+    with store.session() as c:
+        row = c.execute("SELECT value FROM facts WHERE key='bed_target'").fetchone()
+    return row["value"] if row else "23:30"
 
 
 def _mood_label(value) -> str | None:
@@ -161,7 +172,18 @@ def today(
         row = c.execute("SELECT * FROM v_daily WHERE day=?", (day,)).fetchone()
     target_min, target_str = _wake_target()
     wake = row["wake_time"] if row else None
-    delta = int(round((float(wake) * 60 - target_min))) if wake is not None else None
+    if wake is not None:
+        try:
+            if isinstance(wake, str) and ":" in wake:
+                wh, wm = wake.split(":")[:2]
+                w_min = int(float(wh)) * 60 + int(float(wm))
+            else:
+                w_min = int(round(float(wake) * 60))
+            delta = w_min - target_min
+        except Exception:
+            delta = None
+    else:
+        delta = None
     stats = {
         "day": day,
         "weekday": date_cls.fromisoformat(day).strftime("%A"),
@@ -199,11 +221,11 @@ def sleep(
             "SELECT day, sleep_hours, wake_time, bed_time FROM v_daily "
             "WHERE day BETWEEN ? AND ? ORDER BY day", (start.isoformat(), end.isoformat())
         ).fetchall()
-        prev = c.execute(
-            "SELECT AVG(sleep_hours) a FROM v_daily WHERE sleep_hours IS NOT NULL "
-            "AND day BETWEEN ? AND ?",
+        prev_rows = c.execute(
+            "SELECT day, sleep_hours, wake_time, bed_time FROM v_daily "
+            "WHERE day BETWEEN ? AND ?",
             ((start - timedelta(days=days)).isoformat(), (start - timedelta(days=1)).isoformat()),
-        ).fetchone()
+        ).fetchall()
     by_day = {r["day"]: r for r in rows}
     series = []
     for i in range(days):
@@ -215,24 +237,63 @@ def sleep(
             "wake": _hhmm(r["wake_time"]) if r else None,
             "bed": _hhmm(r["bed_time"]) if r else None,
         })
+    def _to_min(val):
+        if isinstance(val, str) and ":" in val:
+            h, m = val.split(":")[:2]
+            return int(float(h)) * 60 + int(float(m))
+        return float(val) * 60
+
+    def _to_bed_min(val):
+        m = _to_min(val)
+        return m + 24 * 60 if m < 12 * 60 else m
+
     values = [s["hours"] for s in series if s["hours"] is not None]
     avg = round(sum(values) / len(values), 2) if values else None
-    prev_avg = round(prev["a"], 2) if prev and prev["a"] is not None else None
-    target_min, target_str = _wake_target()
-    wakes = [r["wake_time"] for r in rows if r["wake_time"] is not None]
-    avg_delta = int(round(sum(float(w) * 60 for w in wakes) / len(wakes) - target_min)) if wakes else None
+
+    prev_sleep_vals = [r["sleep_hours"] for r in prev_rows if r["sleep_hours"] is not None]
+    prev_avg = round(sum(prev_sleep_vals) / len(prev_sleep_vals), 2) if prev_sleep_vals else None
     delta_hours = round(avg - prev_avg, 2) if avg is not None and prev_avg is not None else None
+
+    cur_wake_vals = [_to_min(r["wake_time"]) for r in rows if r["wake_time"] is not None]
+    prev_wake_vals = [_to_min(r["wake_time"]) for r in prev_rows if r["wake_time"] is not None]
+    cur_wake_avg = sum(cur_wake_vals) / len(cur_wake_vals) if cur_wake_vals else None
+    prev_wake_avg = sum(prev_wake_vals) / len(prev_wake_vals) if prev_wake_vals else None
+    delta_wake_min = int(round(cur_wake_avg - prev_wake_avg)) if (cur_wake_avg is not None and prev_wake_avg is not None) else None
+
+    cur_bed_vals = [_to_bed_min(r["bed_time"]) for r in rows if r["bed_time"] is not None]
+    prev_bed_vals = [_to_bed_min(r["bed_time"]) for r in prev_rows if r["bed_time"] is not None]
+    cur_bed_avg = sum(cur_bed_vals) / len(cur_bed_vals) if cur_bed_vals else None
+    prev_bed_avg = sum(prev_bed_vals) / len(prev_bed_vals) if prev_bed_vals else None
+    delta_bed_min = int(round(cur_bed_avg - prev_bed_avg)) if (cur_bed_avg is not None and prev_bed_avg is not None) else None
+
+    def _format_min(total_m: float | None) -> str | None:
+        if total_m is None:
+            return None
+        m = int(round(total_m)) % (24 * 60)
+        return f"{m // 60:02d}:{m % 60:02d}"
+
+    avg_wake_str = _format_min(cur_wake_avg)
+    avg_bed_str = _format_min(cur_bed_avg)
+
+    target_min, target_str = _wake_target()
+    avg_delta = int(round(cur_wake_avg - target_min)) if cur_wake_avg is not None else None
+
     return {
         "period": {"from": start.isoformat(), "to": end.isoformat(), "days": days},
         "avg_hours": avg,
+        "avg_wake": avg_wake_str,
+        "avg_bed": avg_bed_str,
         "avg_delta_min": avg_delta,
         "target_hours": 7.5,
         "target_wake": target_str,
+        "target_bed": _bed_target(),
         "series": series,
         "prev_week": {
             "avg_hours": prev_avg,
             "delta_hours": delta_hours,
-            "significant": bool(delta_hours is not None and abs(delta_hours) >= 0.5),
+            "significant": bool(delta_hours is not None and abs(delta_hours) >= 0.2),
+            "delta_wake_min": delta_wake_min,
+            "delta_bed_min": delta_bed_min,
         },
     }
 

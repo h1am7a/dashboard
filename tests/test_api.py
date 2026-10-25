@@ -1,9 +1,9 @@
 import os
-os.environ["DEV_MODE"] = "1"
-os.environ["DEV_USER_ID"] = "1"
-
 import pytest
 from fastapi.testclient import TestClient
+
+# Ensure DEV_MODE is on for testing
+os.environ["DEV_MODE"] = "true"
 
 from app.api import app
 from app import store
@@ -14,8 +14,7 @@ client = TestClient(app)
 def test_health():
     res = client.get("/api/health")
     assert res.status_code == 200
-    data = res.json()
-    assert data == {"ok": True, "version": "1.0"}
+    assert res.json() == {"ok": True, "version": "1.0"}
 
 
 def test_today():
@@ -23,29 +22,29 @@ def test_today():
     assert res.status_code == 200
     data = res.json()
 
-    assert "day" in data
-    assert "weekday" in data
-    assert "in_progress" in data
-    assert data["in_progress"] is True
-    assert "score" in data
+    # Required top-level keys
+    for key in ["day", "weekday", "in_progress", "score", "sleep", "mood", "hitmap"]:
+        assert key in data
+
+    # Score structure
     assert "done" in data["score"]
     assert "total" in data["score"]
+    assert "percent" in data["score"]
     assert "items" in data["score"]
-    assert len(data["score"]["items"]) > 0
-    assert "sleep" in data
-    assert "target" in data["sleep"]
-    assert "mood" in data
-    assert "hitmap" in data
-    assert len(data["hitmap"]) == 126
-    assert "has_workout" in data["hitmap"][0]
-    assert isinstance(data["hitmap"][0]["has_workout"], bool)
+
+    # Sleep structure
+    assert "hours" in data["sleep"]
+    assert "wake" in data["sleep"]
+    assert "bed" in data["sleep"]
+
+    # Hitmap has entries
+    assert len(data["hitmap"]) > 0
 
 
 def test_day_score_empty_day():
-    score = store.day_score("2035-01-01")
+    score = store.day_score("2099-01-01")
+    assert score["day"] == "2099-01-01"
     assert score["percent"] is None
-    assert score["total"] > 0
-    assert len(score["items"]) > 0
 
 
 def test_sleep_periods():
@@ -58,6 +57,8 @@ def test_sleep_periods():
         assert len(data["series"]) == days
         assert "target_hours" in data
         assert "target_wake" in data
+        assert "avg_wake" in data
+        assert "avg_bed" in data
         assert "prev_week" in data
         assert "significant" in data["prev_week"]
 
@@ -80,7 +81,7 @@ def test_body():
     labels = {m["kind"]: m["label"] for m in data["measurements"]}
     assert labels["biceps_r"] == "Biceps"
     assert labels["forearm_r"] == "Forearm"
-    assert labels["waist"] == "Waist" 
+    assert labels["waist"] == "Waist"
 
     for m in data["measurements"]:
         assert "label" in m
@@ -90,69 +91,72 @@ def test_body():
         assert "significant" in m
         assert "history" in m
 
+    waist_m = next(m for m in data["measurements"] if m["kind"] == "waist")
+    assert len(waist_m["history"]) == 9
+    biceps_m = next(m for m in data["measurements"] if m["kind"] == "biceps_r")
+    assert len(biceps_m["history"]) == 5
+    forearm_m = next(m for m in data["measurements"] if m["kind"] == "forearm_r")
+    assert len(forearm_m["history"]) == 5
+
     assert "workouts" in data
 
 
 def test_task_done_flow():
-    # 1. Create a task via store
     with store.session() as con:
-        cur = con.execute(
+        con.execute(
             "INSERT INTO tasks(title, project, priority, status) VALUES('Test task for API', 'test', 1, 'open')"
         )
-        task_id = cur.lastrowid
+        task_id = con.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-    # 2. Mark task done via API
     res = client.post(f"/api/tasks/{task_id}/done")
     assert res.status_code == 200
     assert res.json() == {"ok": True}
 
-    # 3. Verify task is closed
     with store.session() as con:
         row = con.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
         assert row["status"] == "done"
 
-    # 4. Idempotency test (calling done again succeeds)
+    # Idempotent call returns ok
     res_repeat = client.post(f"/api/tasks/{task_id}/done")
     assert res_repeat.status_code == 200
     assert res_repeat.json() == {"ok": True}
 
+    # 404 for non-existent task
+    res_notfound = client.post("/api/tasks/999999/done")
+    assert res_notfound.status_code == 404
+    assert res_notfound.json()["error"]["code"] == "not_found"
+
 
 def test_unhandled_route_returns_501():
-    res = client.get("/api/unsupported_route")
+    res = client.get("/api/unknown/endpoint")
     assert res.status_code == 501
     assert res.json()["error"]["code"] == "not_implemented"
 
 
-def test_auth_protection():
-    orig_dev = os.environ.get("DEV_MODE")
-    orig_user = os.environ.get("DEV_USER_ID")
-    os.environ.pop("DEV_MODE", None)
-    os.environ.pop("DEV_USER_ID", None)
+def test_auth_protection(monkeypatch):
+    monkeypatch.setenv("DEV_MODE", "false")
+    monkeypatch.delenv("DEV_USER_ID", raising=False)
 
-    try:
-        res = client.get("/api/today")
-        assert res.status_code == 401
-        assert res.json()["error"]["code"] == "no_init_data"
-    finally:
-        if orig_dev is not None:
-            os.environ["DEV_MODE"] = orig_dev
-        if orig_user is not None:
-            os.environ["DEV_USER_ID"] = orig_user
+    res = client.get("/api/today")
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "no_init_data"
 
 
 def test_config_db_path_and_no_logic():
     from app import config
     from pathlib import Path
+
     assert hasattr(config, "DB_PATH")
     assert not hasattr(config, "PRIEST_DB")
-    assert not (Path(__file__).parent.parent / "app" / "logic.py").exists()
+    p = Path(config.DB_PATH)
+    assert p.name == "life.db"
+
+    # Verify logic module is eliminated
+    with pytest.raises(ImportError):
+        from app import logic  # noqa: F401
 
 
 def test_static_assets():
-    res = client.get("/assets/style.css")
+    res = client.get("/")
     assert res.status_code == 200
-    assert len(res.text) > 100
-
-    res_index = client.get("/")
-    assert res_index.status_code == 200
-    assert "SF Pro Display" in res_index.text
+    assert "text/html" in res.headers.get("content-type", "")

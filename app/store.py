@@ -259,12 +259,19 @@ def _norm_date(value: str | None) -> str:
     return s
 
 
-def _check_metric(kind: str, value: float, unit: str | None) -> tuple[float, str | None]:
+def _check_metric(kind: str, value: float | str, unit: str | None) -> tuple[float, str | None]:
     kind = kind.strip().lower()
-    try:
-        value = float(str(value).replace(",", "."))
-    except ValueError:
-        raise ValueError(f"значение '{value}' не число")
+    if kind in ("wake_time", "bed_time") and isinstance(value, str) and ":" in value:
+        try:
+            parts = value.split(":")[:2]
+            value = float(parts[0]) + float(parts[1]) / 60
+        except Exception:
+            raise ValueError(f"значение '{value}' не время HH:MM")
+    else:
+        try:
+            value = float(str(value).replace(",", "."))
+        except ValueError:
+            raise ValueError(f"значение '{value}' не число")
     unit = unit or (METRIC_KINDS.get(kind) or (None, None))[0]
     rng = (METRIC_KINDS.get(kind) or (None, None))[1]
     if rng and not (rng[0] <= value <= rng[1]):
@@ -563,11 +570,19 @@ def _rule_done(c, rule: dict, day: str) -> bool:
             return False
         target = c.execute("SELECT value FROM facts WHERE key='wake_target'").fetchone()
         try:
-            th, tm = (target["value"] if target else "14:30").replace(".", ":").split(":")[:2]
+            th, tm = (target["value"] if target else "07:30").replace(".", ":").split(":")[:2]
             tgt = int(float(th)) + int(float(tm)) / 60
         except Exception:
-            tgt = 14.5
-        return abs(float(v) - tgt) * 60 <= float(rule.get("tol_min", 60))
+            tgt = 7.5
+        try:
+            if isinstance(v, str) and ":" in v:
+                vh, vm = v.split(":")[:2]
+                v_val = int(float(vh)) + int(float(vm)) / 60
+            else:
+                v_val = float(v)
+        except Exception:
+            return False
+        return abs(v_val - tgt) * 60 <= float(rule.get("tol_min", 60))
     return False
 
 
@@ -629,14 +644,14 @@ def measurements(days: int = 365, kinds: list[str] | None = None) -> list[dict]:
                             "significant": False, "history": []})
                 continue
             latest = rows[-1]
-            prev = rows[-2] if len(rows) > 1 else None
-            delta = round(latest["value"] - prev["value"], 1) if prev else None
+            first = rows[0] if rows else None
+            delta = round(latest["value"] - first["value"], 1) if len(rows) > 1 else None
             out.append({
                 "kind": k, "unit": METRIC_KINDS.get(k, ("cm",))[0],
                 "latest": latest["value"], "date": latest["ts"],
                 "delta_cm": delta,
                 "significant": delta is not None and abs(delta) >= 1.0,
-                "since": prev["ts"] if prev else None,
+                "since": first["ts"] if len(rows) > 1 else None,
                 "history": [{"date": r["ts"], "value": r["value"]} for r in rows],
             })
     return out

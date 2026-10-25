@@ -12,5 +12,5 @@ from app import config
 if __name__ == "__main__":
     print(f"Starting Priest Life Mini App at http://{config.HOST}:{config.PORT}")
     print(f"DEV_MODE: {config.DEV_MODE}")
-    print(f"Database: {config.PRIEST_DB}")
+    print(f"Database: {config.DB_PATH}")
     uvicorn.run("app.main:app", host=config.HOST, port=config.PORT, reload=True)

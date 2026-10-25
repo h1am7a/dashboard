@@ -266,6 +266,7 @@
     ===================================================================== */
     let currentTab = 'today';
     let activeBarSelection = null;
+    let activeMeasurementSelection = {};
     let selectedWorkoutDayIndex = 6;
     let sleepPeriod = 7;
 
@@ -351,20 +352,34 @@
     /* =====================================================================
        BADGES & ARROWS
     ===================================================================== */
-    function renderAppleArrowBadge(type, text, isNeutral = true) {
-      let icon = '';
-      let colorClass = isNeutral ? 'text-[var(--label-primary)]' : 'text-[var(--accent-orange)]';
-      let bgClass = isNeutral ? 'bg-[rgba(255,255,255,0.08)]' : 'bg-[rgba(255,159,10,0.15)]';
-
-      if (type === 'up') {
-        icon = '<svg width="10" height="10" style="width:10px;height:10px;" class="w-2.5 h-2.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 17a1 1 0 01-1-1V5.414l-4.293 4.293a1 1 0 01-1.414-1.414l6-6a1 1 0 011.414 0l6 6a1 1 0 01-1.414 1.414L11 5.414V16a1 1 0 01-1 1z" clip-rule="evenodd"/></svg>';
-      } else if (type === 'down') {
-        icon = '<svg width="10" height="10" style="width:10px;height:10px;" class="w-2.5 h-2.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v10.586l4.293-4.293a1 1 0 111.414 1.414l-6 6a1 1 0 01-1.414 0l-6-6a1 1 0 111.414-1.414L9 14.586V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>';
+    function formatDuration(hVal) {
+      if (hVal === null || hVal === undefined || isNaN(hVal)) return '';
+      const totalMin = Math.round(Number(hVal) * 60);
+      const h = Math.floor(Math.abs(totalMin) / 60);
+      const m = Math.abs(totalMin) % 60;
+      if (h === 0) return `${m}m`;
+      if (m === 0) return `${h}h`;
+      return `${h}h${m}m`;
+    }
+    function renderAppleArrowBadge(type, text) {
+      if (!text || text === 'no change' || type === 'none') {
+        return `<span class="text-[11px] font-medium text-[var(--label-secondary)]">no change</span>`;
       }
+      
+      const cleanText = String(text).replace(/^[+-]/, '').trim();
+      const isDown = type === 'down';
+      
+      const arrowSvg = isDown
+        ? `<svg width="13" height="13" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; flex-shrink: 0;" viewBox="0 0 16 16" fill="currentColor">
+             <path fill-rule="evenodd" d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0M8.5 4.5a.5.5 0 0 0-1 0v5.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293z" clip-rule="evenodd" />
+           </svg>`
+        : `<svg width="13" height="13" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; flex-shrink: 0;" viewBox="0 0 16 16" fill="currentColor">
+             <path fill-rule="evenodd" d="M16 8A8 8 0 1 0 0 8a8 8 0 0 0 16 0zm-7.5 3.5a.5.5 0 0 1-1 0V5.707L5.354 7.854a.5.5 0 1 1-.708-.708l3-3a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 5.707V11.5z" clip-rule="evenodd" />
+           </svg>`;
 
       return `
-        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-tight ${colorClass} ${bgClass}">
-          ${icon}<span>${text}</span>
+        <span style="display: inline-flex; align-items: center; gap: 4px;" class="text-[12px] font-medium text-[var(--label-secondary)]">
+          ${arrowSvg}<span>${cleanText}</span>
         </span>
       `;
     }
@@ -491,7 +506,7 @@
                 <div>
                   ${it.done ?
                     '<span class="text-[11px] font-semibold text-[var(--accent-green)]">Completed</span>' :
-                    `<button onclick="markTaskDone(${taskId})" class="px-3 py-1 rounded-full text-xs font-semibold bg-[var(--accent-blue)] text-black shadow-sm active:scale-95 transition-transform">Done</button>`
+                    `<button onclick="markTaskDone(${taskId})" class="px-3 py-1 rounded-full text-xs font-bold bg-[var(--accent-blue)] text-white shadow-sm active:scale-95 transition-transform">Done</button>`
                   }
                 </div>
               </div>
@@ -513,7 +528,7 @@
       if (d.sleep && d.sleep.delta_min !== null) {
         const isNeutral = Math.abs(d.sleep.delta_min) <= 60;
         const arrowType = d.sleep.delta_min > 0 ? 'up' : (d.sleep.delta_min < 0 ? 'down' : 'none');
-        sleepDeltaHtml = renderAppleArrowBadge(arrowType, `${Math.abs(d.sleep.delta_min)}min`, isNeutral);
+        sleepDeltaHtml = renderAppleArrowBadge(arrowType, `${Math.abs(d.sleep.delta_min)}m`, isNeutral);
       }
 
       // Mood 3D emoji
@@ -581,8 +596,8 @@
               ${sleepDeltaHtml}
             </div>
             <div>
-              <div class="text-2xl font-bold tracking-tight text-[var(--label-primary)] num">${d.sleep?.hours !== null && d.sleep?.hours !== undefined ? d.sleep.hours + 'h' : '&mdash;'}</div>
-              <div class="text-[11px] text-[var(--label-secondary)] font-medium mt-0.5">${d.sleep?.bed || '&mdash;'} &rarr; ${d.sleep?.wake || '&mdash;'}</div>
+              <div class="text-2xl font-bold tracking-tight text-[var(--label-primary)] num">${d.sleep?.hours !== null && d.sleep?.hours !== undefined ? formatDuration(d.sleep.hours) : '&mdash;'}</div>
+              <div class="text-[11px] text-[var(--label-secondary)] font-medium mt-0.5">${d.sleep?.bed || '&mdash;'} <span class="text-white font-semibold">&rarr; ${d.sleep?.wake || '&mdash;'}</span></div>
             </div>
           </div>
 
@@ -634,186 +649,374 @@
       const container = document.getElementById('screen-sleep');
 
       function generateSmoothSpline(pts) {
-        if (pts.length === 0) return '';
-        if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
+        if (!pts || pts.length < 2) return '';
         let path = `M ${pts[0].x} ${pts[0].y}`;
         for (let i = 0; i < pts.length - 1; i++) {
-          const p0 = i > 0 ? pts[i - 1] : pts[i];
+          const p0 = pts[i === 0 ? 0 : i - 1];
           const p1 = pts[i];
           const p2 = pts[i + 1];
-          const p3 = i < pts.length - 2 ? pts[i + 2] : p2;
-          const cp1x = p1.x + (p2.x - p0.x) / 6;
-          const cp1y = p1.y + (p2.y - p0.y) / 6;
-          const cp2x = p2.x - (p3.x - p1.x) / 6;
-          const cp2y = p2.y - (p3.y - p1.y) / 6;
-          path += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+          const p3 = pts[i + 2] || p2;
+          const cp1x = p1.x + (p2.x - p0.x) / 5;
+          const cp1y = p1.y + (p2.y - p0.y) / 5;
+          const cp2x = p2.x - (p3.x - p1.x) / 5;
+          const cp2y = p2.y - (p3.y - p1.y) / 5;
+          path += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x} ${p2.y}`;
         }
         return path;
       }
 
-      const svgW = 326;
-      const svgH = 110;
-      const padTop = 15;
-      const padBot = 22;
-      const plotH = svgH - padTop - padBot;
-
-      // 1. SLEEP DURATION BARS
-      const yMinS = 4.0;
-      const yMaxS = 10.0;
-      const targetS = d.target_hours || 7.5;
-      const targetY_S = padTop + plotH - ((targetS - yMinS) / (yMaxS - yMinS)) * plotH;
+      const svgW = 340;
+      const svgH = 118;
+      const chartBottom = 92;
+      const chartTop = 22;
+      const usableH = chartBottom - chartTop;
 
       const seriesCount = d.series ? d.series.length : 0;
-      const barWidth = seriesCount === 7 ? 24 : (seriesCount === 30 ? 5 : 16);
-      const gap = seriesCount > 0 ? (svgW - (seriesCount * barWidth)) / (seriesCount + 1) : 0;
+      const isDense = seriesCount > 15;
+      const isMedium = seriesCount > 7;
+      const barWidth = seriesCount <= 7 ? 24 : (seriesCount <= 30 ? 6 : 2);
+      const leftMargin = 16;
+      const rightMargin = 32;
+      const plotWidth = svgW - leftMargin - rightMargin;
+      const stepX = seriesCount > 1 ? plotWidth / (seriesCount - 1) : plotWidth / 2;
+
+      const isDurationSelected = activeBarSelection && activeBarSelection.chart === 'sleep' && d.series && d.series[activeBarSelection.index];
+      const selectedItem = isDurationSelected ? d.series[activeBarSelection.index] : null;
+
+      // 1. SLEEP DURATION
+      const slFloor = 4.0;
+      const slMax = 10.0;
+      const targetS = d.target_hours || 7.5;
+      const targetY_S = Math.round(chartBottom - ((targetS - slFloor) / (slMax - slFloor)) * usableH);
+      const firstBarLeft = seriesCount > 0 ? Math.round(leftMargin - barWidth / 2) : leftMargin;
+      const lastBarRight = seriesCount > 0 ? Math.round(leftMargin + (seriesCount - 1) * stepX + barWidth / 2) : (svgW - 24);
 
       const dayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-      const barsHtml = (d.series || []).map((item, idx) => {
-        const x = gap + idx * (barWidth + gap);
+      const slBarsSvg = (d.series || []).map((item, i) => {
+        const x = Math.round(leftMargin + i * stepX);
         let labelText = '';
         if (item.day) {
           if (seriesCount <= 7) {
             const dt = new Date(item.day + 'T00:00:00');
             labelText = dayLetters[dt.getDay()];
-          } else if (idx % 7 === 0) {
+          } else if (i % 7 === 0) {
             labelText = item.day.split('-')[2];
           }
         }
 
-        const labelSvg = labelText ? `<text x="${x + barWidth/2}" y="${svgH - 6}" font-size="9" fill="var(--label-secondary)" text-anchor="middle" font-weight="500">${labelText}</text>` : '';
+        const isSelected = isDurationSelected && activeBarSelection.index === i;
+        const hitWidth = Math.max(14, Math.round(stepX));
 
-        if (item.hours === null || item.hours === undefined) {
-          return `
-            <g class="chart-bar-clickable" onclick="handleBarClick('sleep', ${idx}, event)">
-              ${labelSvg}
+        let rectSvg = '';
+        if (item.hours !== null && item.hours !== undefined) {
+          const clamped = Math.max(slFloor, Math.min(slMax, item.hours));
+          const h = Math.round(((clamped - slFloor) / (slMax - slFloor)) * usableH);
+          const y = chartBottom - h;
+          const fill = isSelected ? 'var(--chart-neutral-active)' : 'var(--chart-neutral)';
+          rectSvg = `<rect x="${x - barWidth/2}" y="${y}" width="${barWidth}" height="${h}" rx="${barWidth > 8 ? 4 : 1}" fill="${fill}" />`;
+        }
+
+        let bubbleSvg = '';
+        if (isSelected && item.hours !== null) {
+          const bW = 54;
+          const bH = 20;
+          const bX = Math.max(4, Math.min(svgW - bW - 4, x - bW/2));
+          const bY = 2;
+          bubbleSvg = `
+            <g class="speech-bubble" style="pointer-events: none;">
+              <rect x="${bX}" y="${bY}" width="${bW}" height="${bH}" rx="5" fill="var(--bubble-bg)" stroke="rgba(255,255,255,0.25)" stroke-width="0.8" />
+              <polygon points="${x - 4},${bY + bH} ${x + 4},${bY + bH} ${x},${bY + bH + 4}" fill="var(--bubble-bg)" />
+              <text x="${bX + bW/2}" y="${bY + 13}" fill="var(--label-primary)" font-size="9" font-weight="700" text-anchor="middle" class="num">${formatDuration(item.hours)}</text>
             </g>
           `;
         }
 
-        const clampedHours = Math.max(yMinS, Math.min(yMaxS, item.hours));
-        const barH = ((clampedHours - yMinS) / (yMaxS - yMinS)) * plotH;
-        const y = padTop + plotH - barH;
-        const isSelected = activeBarSelection && activeBarSelection.chart === 'sleep' && activeBarSelection.index === idx;
-        const fillColor = isSelected ? 'var(--chart-neutral-active)' : 'var(--chart-neutral)';
-
-        return `
-          <g class="chart-bar-clickable" onclick="handleBarClick('sleep', ${idx}, event)">
-            <rect x="${x}" y="${y}" width="${barWidth}" height="${barH}" fill="${fillColor}" rx="${barWidth > 10 ? 4 : 2}"/>
+        const labelSvg = labelText ? `<text x="${x}" y="108" fill="${isSelected ? 'var(--label-primary)' : 'var(--label-secondary)'}" font-size="${isDense ? '8.5' : '10.5'}" font-weight="${isSelected ? '700' : '500'}" text-anchor="middle">${labelText}</text>` : '';        return `
+          <g onclick="handleBarClick('sleep', ${i}, event)" class="cursor-pointer" style="cursor: pointer;">
+            ${rectSvg}
             ${labelSvg}
+            <rect x="${x - hitWidth/2}" y="10" width="${hitWidth}" height="96" fill="transparent" class="chart-bar-clickable" />
+            ${bubbleSvg}
           </g>
         `;
       }).join('');
 
-      // Tooltip for selected bar
-      let bubbleHtml = '';
-      if (activeBarSelection && activeBarSelection.chart === 'sleep' && d.series && d.series[activeBarSelection.index]) {
-        const it = d.series[activeBarSelection.index];
-        const bx = gap + activeBarSelection.index * (barWidth + gap) + barWidth / 2;
-        bubbleHtml = `
-          <g class="speech-bubble" transform="translate(${Math.max(45, Math.min(svgW - 45, bx))}, 18)">
-            <rect x="-42" y="-14" width="84" height="22" rx="6" fill="var(--bubble-bg)" stroke="var(--separator)" stroke-width="0.5"/>
-            <text x="0" y="1" font-size="9.5" fill="var(--label-primary)" text-anchor="middle" font-weight="600">${it.hours ? it.hours + 'h' : 'No data'}</text>
-          </g>
-        `;
+      let durationDisplay = d.avg_hours ? formatDuration(d.avg_hours) : '7h30m';
+      let durationSub = 'Daily Average';
+      if (selectedItem && selectedItem.hours !== null) {
+        durationDisplay = formatDuration(selectedItem.hours);
+        const dt = new Date(selectedItem.day + 'T00:00:00');
+        durationSub = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      }
+
+      let prevWeekBadge = '<span class="text-xs text-[var(--label-secondary)] font-medium">no change</span>';
+      if (d.prev_week && d.prev_week.delta_hours !== null && d.prev_week.delta_hours !== undefined && d.prev_week.delta_hours !== 0) {
+        const arrow = d.prev_week.delta_hours > 0 ? 'up' : 'down';
+        prevWeekBadge = renderAppleArrowBadge(arrow, `${formatDuration(Math.abs(d.prev_week.delta_hours))}`);
       }
 
       // 2. WAKE TIME SPLINE
-      const yMinW = 10.0;
-      const yMaxW = 18.0;
-      const targetW = 14.5;
-      const targetY_W = padTop + plotH - ((targetW - yMinW) / (yMaxW - yMinW)) * plotH;
+      const targetW_str = d.target_wake || '07:30';
+      const targetW_parts = targetW_str.split(':');
+      const targetW = parseInt(targetW_parts[0]) + parseInt(targetW_parts[1]) / 60;
+      const wkFloor = 6.0;
+      const wkMax = 9.0;
+      const targetY_W = Math.round(chartBottom - ((targetW - wkFloor) / (wkMax - wkFloor)) * usableH);
 
-      const wakePoints = [];
-      (d.series || []).forEach((it, idx) => {
+      const isWakeSelected = activeBarSelection && activeBarSelection.chart === 'wake';
+      const selWakeItem = isWakeSelected && d.series ? d.series[activeBarSelection.index] : null;
+
+      const wkPts = [];
+      (d.series || []).forEach((it, i) => {
         if (!it.wake) return;
+        const x = Math.round(leftMargin + i * stepX);
         const parts = it.wake.split(':');
         const val = parseInt(parts[0]) + parseInt(parts[1]) / 60;
-        const clampedVal = Math.max(yMinW, Math.min(yMaxW, val));
-        const px = gap + idx * (barWidth + gap) + barWidth / 2;
-        const py = padTop + plotH - ((clampedVal - yMinW) / (yMaxW - yMinW)) * plotH;
-        wakePoints.push({ x: px, y: py, raw: it.wake, day: it.day });
+        const clamped = Math.max(wkFloor, Math.min(wkMax, val));
+        const y = Math.round(chartBottom - ((clamped - wkFloor) / (wkMax - wkFloor)) * usableH);
+        wkPts.push({ x, y, val, raw: it.wake, day: it.day, index: i });
       });
-      const wakePathD = generateSmoothSpline(wakePoints);
+      const wkSplinePath = generateSmoothSpline(wkPts);
+
+      const wkNodesSvg = wkPts.map((p) => {
+        const isSelected = isWakeSelected && activeBarSelection.index === p.index;
+        const hitWidth = Math.max(14, Math.round(stepX));
+        let dotSvg = '';
+        if (isSelected) {
+          dotSvg = `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="var(--bg-secondary)" stroke="#FFFFFF" stroke-width="2.5" class="chart-bar-clickable" />`;
+        } else if (!isDense) {
+          dotSvg = `<circle cx="${p.x}" cy="${p.y}" r="${isMedium ? 2.5 : 3.5}" fill="var(--bg-secondary)" stroke="var(--chart-neutral)" stroke-width="2" class="chart-bar-clickable" />`;
+        }
+
+        let bubbleSvg = '';
+        if (isSelected) {
+          const bW = 56;
+          const bH = 20;
+          const bX = Math.max(4, Math.min(svgW - bW - 4, p.x - bW/2));
+          const bY = Math.max(2, p.y - bH - 6);
+          bubbleSvg = `
+            <g class="speech-bubble" style="pointer-events: none;">
+              <rect x="${bX}" y="${bY}" width="${bW}" height="${bH}" rx="5" fill="var(--bubble-bg)" stroke="rgba(255,255,255,0.25)" stroke-width="0.8" />
+              <polygon points="${p.x - 4},${bY + bH} ${p.x + 4},${bY + bH} ${p.x},${bY + bH + 4}" fill="var(--bubble-bg)" />
+              <text x="${bX + bW/2}" y="${bY + 13}" fill="var(--label-primary)" font-size="9" font-weight="700" text-anchor="middle" class="num">${p.raw}</text>
+            </g>
+          `;
+        }
+
+        let labelText = '';
+        if (p.day) {
+          if (seriesCount <= 7) {
+            const dt = new Date(p.day + 'T00:00:00');
+            labelText = dayLetters[dt.getDay()];
+          } else if (p.index % 7 === 0) {
+            labelText = p.day.split('-')[2];
+          }
+        }
+        const labelSvg = labelText ? `<text x="${p.x}" y="108" fill="${isSelected ? 'var(--label-primary)' : 'var(--label-secondary)'}" font-size="${isDense ? '8.5' : '10.5'}" font-weight="${isSelected ? '700' : '500'}" text-anchor="middle">${labelText}</text>` : '';        return `
+          <g onclick="handleBarClick('wake', ${p.index}, event)" class="cursor-pointer" style="cursor: pointer;">
+            <line x1="${p.x}" y1="${chartTop}" x2="${p.x}" y2="${chartBottom}" stroke="var(--chart-grid)" stroke-dasharray="2 3" stroke-width="${isDense ? '0.5' : '0.8'}" />
+            ${dotSvg}
+            ${labelSvg}
+            <rect x="${p.x - hitWidth/2}" y="10" width="${hitWidth}" height="96" fill="transparent" class="chart-bar-clickable" />
+            ${bubbleSvg}
+          </g>
+        `;
+      }).join('');
+
+      const lastWakePoint = wkPts.length ? wkPts[wkPts.length - 1] : null;
+      let wakeDisplay = d.avg_wake || lastWakePoint?.raw || targetW_str;
+      let wakeSub = 'Daily Average';
+      if (selWakeItem && selWakeItem.wake) {
+        wakeDisplay = selWakeItem.wake;
+        const dt = new Date(selWakeItem.day + 'T00:00:00');
+        wakeSub = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      }
+
+      let wakeBadge = '<span class="text-xs text-[var(--label-secondary)] font-medium">no change</span>';
+      if (d.prev_week && d.prev_week.delta_wake_min !== null && d.prev_week.delta_wake_min !== undefined && d.prev_week.delta_wake_min !== 0) {
+        const dir = d.prev_week.delta_wake_min > 0 ? 'up' : 'down';
+        wakeBadge = renderAppleArrowBadge(dir, `${Math.abs(d.prev_week.delta_wake_min)}m`);
+      }
 
       // 3. BED TIME SPLINE
-      const yMinB = 4.0;
-      const yMaxB = 12.0;
-      const targetB = 8.0;
-      const targetY_B = padTop + plotH - ((targetB - yMinB) / (yMaxB - yMinB)) * plotH;
+      const targetB_str = d.target_bed || '23:30';
+      const targetB_parts = targetB_str.split(':');
+      let targetB_hours = parseInt(targetB_parts[0]) + parseInt(targetB_parts[1]) / 60;
+      if (parseInt(targetB_parts[0]) < 12) targetB_hours += 24;
+      const bdBFloor = 22.0;
+      const bdBMax = 25.5;
+      const targetY_B = Math.round(chartBottom - ((targetB_hours - bdBFloor) / (bdBMax - bdBFloor)) * usableH);
 
-      const bedPoints = [];
-      (d.series || []).forEach((it, idx) => {
+      const isBedSelected = activeBarSelection && activeBarSelection.chart === 'bed';
+      const selBedItem = isBedSelected && d.series ? d.series[activeBarSelection.index] : null;
+
+      const bdPts = [];
+      (d.series || []).forEach((it, i) => {
         if (!it.bed) return;
+        const x = Math.round(leftMargin + i * stepX);
         const parts = it.bed.split(':');
-        const val = parseInt(parts[0]) + parseInt(parts[1]) / 60;
-        const clampedVal = Math.max(yMinB, Math.min(yMaxB, val));
-        const px = gap + idx * (barWidth + gap) + barWidth / 2;
-        const py = padTop + plotH - ((clampedVal - yMinB) / (yMaxB - yMinB)) * plotH;
-        bedPoints.push({ x: px, y: py, raw: it.bed, day: it.day });
+        let val = parseInt(parts[0]) + parseInt(parts[1]) / 60;
+        if (parseInt(parts[0]) < 12) val += 24;
+        const clamped = Math.max(bdBFloor, Math.min(bdBMax, val));
+        const y = Math.round(chartBottom - ((clamped - bdBFloor) / (bdBMax - bdBFloor)) * usableH);
+        bdPts.push({ x, y, val, raw: it.bed, day: it.day, index: i });
       });
-      const bedPathD = generateSmoothSpline(bedPoints);
+      const bdSplinePath = generateSmoothSpline(bdPts);
 
-      // Previous week badge
-      let prevWeekBadge = '';
-      if (d.prev_week && d.prev_week.significant) {
-        const arrow = d.prev_week.delta_hours >= 0 ? 'up' : 'down';
-        prevWeekBadge = renderAppleArrowBadge(arrow, `${Math.abs(d.prev_week.delta_hours)}h vs prev week`, true);
+      const bdNodesSvg = bdPts.map((p) => {
+        const isSelected = isBedSelected && activeBarSelection.index === p.index;
+        const hitWidth = Math.max(14, Math.round(stepX));
+        let dotSvg = '';
+        if (isSelected) {
+          dotSvg = `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="var(--bg-secondary)" stroke="#FFFFFF" stroke-width="2.5" class="chart-bar-clickable" />`;
+        } else if (!isDense) {
+          dotSvg = `<circle cx="${p.x}" cy="${p.y}" r="${isMedium ? 2.5 : 3.5}" fill="var(--bg-secondary)" stroke="var(--chart-neutral)" stroke-width="2" class="chart-bar-clickable" />`;
+        }
+
+        let bubbleSvg = '';
+        if (isSelected) {
+          const bW = 56;
+          const bH = 20;
+          const bX = Math.max(4, Math.min(svgW - bW - 4, p.x - bW/2));
+          const bY = Math.max(2, p.y - bH - 6);
+          bubbleSvg = `
+            <g class="speech-bubble" style="pointer-events: none;">
+              <rect x="${bX}" y="${bY}" width="${bW}" height="${bH}" rx="5" fill="var(--bubble-bg)" stroke="rgba(255,255,255,0.25)" stroke-width="0.8" />
+              <polygon points="${p.x - 4},${bY + bH} ${p.x + 4},${bY + bH} ${p.x},${bY + bH + 4}" fill="var(--bubble-bg)" />
+              <text x="${bX + bW/2}" y="${bY + 13}" fill="var(--label-primary)" font-size="9" font-weight="700" text-anchor="middle" class="num">${p.raw}</text>
+            </g>
+          `;
+        }
+
+        let labelText = '';
+        if (p.day) {
+          if (seriesCount <= 7) {
+            const dt = new Date(p.day + 'T00:00:00');
+            labelText = dayLetters[dt.getDay()];
+          } else if (p.index % 7 === 0) {
+            labelText = p.day.split('-')[2];
+          }
+        }
+        const labelSvg = labelText ? `<text x="${p.x}" y="108" fill="${isSelected ? 'var(--label-primary)' : 'var(--label-secondary)'}" font-size="${isDense ? '8.5' : '10.5'}" font-weight="${isSelected ? '700' : '500'}" text-anchor="middle">${labelText}</text>` : '';        return `
+          <g onclick="handleBarClick('bed', ${p.index}, event)" class="cursor-pointer" style="cursor: pointer;">
+            <line x1="${p.x}" y1="${chartTop}" x2="${p.x}" y2="${chartBottom}" stroke="var(--chart-grid)" stroke-dasharray="2 3" stroke-width="${isDense ? '0.5' : '0.8'}" />
+            ${dotSvg}
+            ${labelSvg}
+            <rect x="${p.x - hitWidth/2}" y="10" width="${hitWidth}" height="96" fill="transparent" class="chart-bar-clickable" />
+            ${bubbleSvg}
+          </g>
+        `;
+      }).join('');
+
+      const lastBedPoint = bdPts.length ? bdPts[bdPts.length - 1] : null;
+      let bedDisplay = d.avg_bed || lastBedPoint?.raw || targetB_str;
+      let bedSub = 'Daily Average';
+      if (selBedItem && selBedItem.bed) {
+        bedDisplay = selBedItem.bed;
+        const dt = new Date(selBedItem.day + 'T00:00:00');
+        bedSub = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      }
+
+      let bedBadge = '<span class="text-xs text-[var(--label-secondary)] font-medium">no change</span>';
+      if (d.prev_week && d.prev_week.delta_bed_min !== null && d.prev_week.delta_bed_min !== undefined && d.prev_week.delta_bed_min !== 0) {
+        const dir = d.prev_week.delta_bed_min > 0 ? 'up' : 'down';
+        bedBadge = renderAppleArrowBadge(dir, `${Math.abs(d.prev_week.delta_bed_min)}m`);
       }
 
       container.innerHTML = `
         <!-- Sleep Header -->
-        <div class="pt-1">
-          <h1 class="text-3xl font-bold tracking-tight text-[var(--label-primary)] sf-display">Sleep</h1>
-          <div class="text-xs text-[var(--label-secondary)] mt-0.5">Duration and schedule</div>
-        </div>
-
-        <!-- Period Switcher: 7 Days / 30 Days / 90 Days -->
-        <div class="flex p-1 bg-[var(--bg-secondary)] rounded-xl border border-[var(--separator)]">
-          <button onclick="selectPeriod(7)" class="flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${periodDays === 7 ? 'bg-[var(--bg-tertiary)] text-[var(--label-primary)] shadow-sm' : 'text-[var(--label-secondary)]'}">7 Days</button>
-          <button onclick="selectPeriod(30)" class="flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${periodDays === 30 ? 'bg-[var(--bg-tertiary)] text-[var(--label-primary)] shadow-sm' : 'text-[var(--label-secondary)]'}">30 Days</button>
-          <button onclick="selectPeriod(90)" class="flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${periodDays === 90 ? 'bg-[var(--bg-tertiary)] text-[var(--label-primary)] shadow-sm' : 'text-[var(--label-secondary)]'}">90 Days</button>
-        </div>
-
-        <!-- Chart 1: Sleep Duration -->
-        <div class="ios-widget-card space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Sleep Duration</span>
-            <span class="text-[11px] font-semibold text-[var(--accent-blue)]">Target: ${d.target_hours || 7.5}h</span>
+        <div class="pt-1 space-y-2">
+          <div>
+            <h1 class="text-3xl font-bold tracking-tight text-[var(--label-primary)] sf-display">Sleep</h1>
+            <div class="text-xs text-[var(--label-secondary)] mt-0.5 font-medium">Duration &amp; Schedule</div>
           </div>
-          <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-auto overflow-visible">
-            <line x1="0" y1="${targetY_S}" x2="${svgW}" y2="${targetY_S}" stroke="var(--accent-blue)" stroke-width="1.2" stroke-dasharray="4 3"/>
-            <line x1="0" y1="${padTop + plotH}" x2="${svgW}" y2="${padTop + plotH}" stroke="var(--chart-grid)" stroke-width="0.5"/>
-            ${barsHtml}
-            ${bubbleHtml}
-          </svg>
+
+          <!-- Period Switcher: 7 Days / 30 Days / 90 Days -->
+          <div class="flex p-1 bg-[var(--bg-secondary)] rounded-xl border border-[var(--separator)] gap-1">
+            <button onclick="selectPeriod(7)" class="flex-1 py-1 text-xs font-semibold rounded-lg transition-colors ${periodDays === 7 ? 'bg-[var(--bg-tertiary)] text-[var(--label-primary)] shadow-sm' : 'text-[var(--label-secondary)]'}">7 Days</button>
+            <button onclick="selectPeriod(30)" class="flex-1 py-1 text-xs font-semibold rounded-lg transition-colors ${periodDays === 30 ? 'bg-[var(--bg-tertiary)] text-[var(--label-primary)] shadow-sm' : 'text-[var(--label-secondary)]'}">30 Days</button>
+            <button onclick="selectPeriod(90)" class="flex-1 py-1 text-xs font-semibold rounded-lg transition-colors ${periodDays === 90 ? 'bg-[var(--bg-tertiary)] text-[var(--label-primary)] shadow-sm' : 'text-[var(--label-secondary)]'}">90 Days</button>
+          </div>
         </div>
 
-        <!-- Chart 2: Wake Time -->
-        <div class="ios-widget-card space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Wake Time</span>
-            <span class="text-[11px] font-semibold text-[var(--accent-blue)]">Target: ${d.target_wake || '14:30'}</span>
+        <!-- 1. SLEEP DURATION CARD -->
+        <div class="ios-widget-card space-y-2">
+          <div class="text-[13px] font-medium text-[var(--label-secondary)]">Sleep Duration</div>
+          <div class="flex items-baseline justify-between">
+            <div>
+              <span class="text-3xl font-bold text-[var(--label-primary)] num tracking-tight">${durationDisplay}</span>
+              <div class="text-[11px] text-[var(--label-secondary)] font-medium mt-0.5">
+                Target: <span class="text-[var(--accent-blue)] font-semibold">${formatDuration(d.target_hours || 7.5)}</span> &bull; <span class="text-[var(--label-tertiary)]">${durationSub}</span>
+              </div>
+            </div>
+            ${prevWeekBadge}
           </div>
-          <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-auto overflow-visible">
-            <line x1="0" y1="${targetY_W}" x2="${svgW}" y2="${targetY_W}" stroke="var(--accent-blue)" stroke-width="1.2" stroke-dasharray="4 3"/>
-            <line x1="0" y1="${padTop + plotH}" x2="${svgW}" y2="${padTop + plotH}" stroke="var(--chart-grid)" stroke-width="0.5"/>
-            <path d="${wakePathD}" fill="none" stroke="var(--chart-neutral)" stroke-width="2" stroke-linecap="round"/>
-            ${wakePoints.map(p => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="var(--chart-neutral)" stroke="var(--bg-secondary)" stroke-width="1.5"/>`).join('')}
-          </svg>
+
+          <div class="w-full h-[118px] relative pt-1">
+            <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-full overflow-visible">
+              <text x="${svgW - 4}" y="${chartTop + 4}" fill="var(--label-secondary)" font-size="9" text-anchor="end" class="num">10h</text>
+              <text x="${svgW - 4}" y="${chartBottom + 1}" fill="var(--label-secondary)" font-size="9" text-anchor="end" class="num">4h</text>
+              
+              <line x1="16" y1="${chartBottom}" x2="${svgW - 24}" y2="${chartBottom}" stroke="var(--chart-grid)" stroke-width="1" shape-rendering="crispEdges" />
+              <line x1="16" y1="${chartTop}" x2="${svgW - 24}" y2="${chartTop}" stroke="var(--chart-grid)" stroke-dasharray="2 3" stroke-width="0.8" shape-rendering="crispEdges" />
+              ${slBarsSvg}
+              <line x1="${firstBarLeft}" y1="${targetY_S}" x2="${lastBarRight}" y2="${targetY_S}" stroke="var(--accent-blue)" stroke-dasharray="7 4" stroke-width="1.6" shape-rendering="crispEdges" style="pointer-events: none;" />
+            </svg>
+          </div>
         </div>
 
-        <!-- Chart 3: Bed Time -->
-        <div class="ios-widget-card space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">Bed Time</span>
-            <span class="text-[11px] font-semibold text-[var(--accent-blue)]">Target: 08:00</span>
+        <!-- 2. WAKE TIME CARD -->
+        <div class="ios-widget-card space-y-2">
+          <div class="text-[13px] font-medium text-[var(--label-secondary)]">Wake Time</div>
+          <div class="flex items-baseline justify-between">
+            <div>
+              <span class="text-3xl font-bold text-[var(--label-primary)] num tracking-tight">${wakeDisplay}</span>
+              <div class="text-[11px] text-[var(--label-secondary)] font-medium mt-0.5">
+                Target: <span class="text-[var(--accent-blue)] font-semibold">${targetW_str}</span> &bull; <span class="text-[var(--label-tertiary)]">${wakeSub}</span>
+              </div>
+            </div>
+            ${wakeBadge}
           </div>
-          <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-auto overflow-visible">
-            <line x1="0" y1="${targetY_B}" x2="${svgW}" y2="${targetY_B}" stroke="var(--accent-blue)" stroke-width="1.2" stroke-dasharray="4 3"/>
-            <line x1="0" y1="${padTop + plotH}" x2="${svgW}" y2="${padTop + plotH}" stroke="var(--chart-grid)" stroke-width="0.5"/>
-            <path d="${bedPathD}" fill="none" stroke="var(--chart-neutral)" stroke-width="2" stroke-linecap="round"/>
-            ${bedPoints.map(p => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="var(--chart-neutral)" stroke="var(--bg-secondary)" stroke-width="1.5"/>`).join('')}
-          </svg>
+
+          <div class="w-full h-[124px] relative pt-1">
+            <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-full overflow-visible">
+              <text x="${svgW - 4}" y="${chartTop + 4}" fill="var(--label-secondary)" font-size="9" text-anchor="end" class="num">09:00</text>
+              <text x="${svgW - 4}" y="${chartBottom + 1}" fill="var(--label-secondary)" font-size="9" text-anchor="end" class="num">06:00</text>
+              
+              <line x1="16" y1="${chartBottom}" x2="${svgW - 24}" y2="${chartBottom}" stroke="var(--chart-grid)" stroke-width="1" shape-rendering="crispEdges" />
+              <line x1="16" y1="${chartTop}" x2="${svgW - 24}" y2="${chartTop}" stroke="var(--chart-grid)" stroke-dasharray="2 3" stroke-width="0.8" shape-rendering="crispEdges" />
+              <path d="${wkSplinePath}" fill="none" stroke="var(--chart-neutral)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+              <line x1="16" y1="${targetY_W}" x2="${svgW - 24}" y2="${targetY_W}" stroke="var(--accent-blue)" stroke-dasharray="7 4" stroke-width="1.6" shape-rendering="crispEdges" style="pointer-events: none;" />
+              ${wkNodesSvg}
+            </svg>
+          </div>
+        </div>
+
+        <!-- 3. BED TIME CARD -->
+        <div class="ios-widget-card space-y-2">
+          <div class="text-[13px] font-medium text-[var(--label-secondary)]">Bed Time</div>
+          <div class="flex items-baseline justify-between">
+            <div>
+              <span class="text-3xl font-bold text-[var(--label-primary)] num tracking-tight">${bedDisplay}</span>
+              <div class="text-[11px] text-[var(--label-secondary)] font-medium mt-0.5">
+                Target: <span class="text-[var(--accent-blue)] font-semibold">${targetB_str}</span> &bull; <span class="text-[var(--label-tertiary)]">${bedSub}</span>
+              </div>
+            </div>
+            ${bedBadge}
+          </div>
+
+          <div class="w-full h-[124px] relative pt-1">
+            <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-full overflow-visible">
+              <text x="${svgW - 4}" y="${chartTop + 4}" fill="var(--label-secondary)" font-size="9" text-anchor="end" class="num">01:30</text>
+              <text x="${svgW - 4}" y="${chartBottom + 1}" fill="var(--label-secondary)" font-size="9" text-anchor="end" class="num">22:00</text>
+              
+              <line x1="16" y1="${chartBottom}" x2="${svgW - 24}" y2="${chartBottom}" stroke="var(--chart-grid)" stroke-width="1" shape-rendering="crispEdges" />
+              <line x1="16" y1="${chartTop}" x2="${svgW - 24}" y2="${chartTop}" stroke="var(--chart-grid)" stroke-dasharray="2 3" stroke-width="0.8" shape-rendering="crispEdges" />
+              <path d="${bdSplinePath}" fill="none" stroke="var(--chart-neutral)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+              <line x1="16" y1="${targetY_B}" x2="${svgW - 24}" y2="${targetY_B}" stroke="var(--accent-blue)" stroke-dasharray="7 4" stroke-width="1.6" shape-rendering="crispEdges" style="pointer-events: none;" />
+              ${bdNodesSvg}
+            </svg>
+          </div>
         </div>
       `;
     }
@@ -864,68 +1067,178 @@
         return path;
       }
 
-      function generateSparkline(vals, w = 120, h = 28) {
-        if (!vals || vals.length === 0) {
-          return `<line x1="0" y1="${h/2}" x2="${w}" y2="${h/2}" stroke="var(--chart-grid)" stroke-width="1" stroke-dasharray="2 2"/>`;
+      function formatShortDate(iso) {
+        if (!iso) return '';
+        try {
+          const dt = new Date(iso + 'T00:00:00');
+          return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+        } catch (e) {
+          return iso;
         }
-        if (vals.length === 1) {
-          const x = w / 2;
-          const y = h / 2;
-          return `<circle cx="${x}" cy="${y}" r="3" fill="var(--chart-neutral)" stroke="var(--bg-secondary)" stroke-width="1.5"/>`;
-        }
-        const min = Math.min(...vals);
-        const max = Math.max(...vals);
-        const range = (max - min) || 1;
-        const pts = vals.map((v, i) => {
-          const x = 6 + (i / (vals.length - 1)) * (w - 12);
-          const y = h - 6 - ((v - min) / range) * (h - 12);
-          return { x, y };
-        });
-        const pathD = generateSmoothSpline(pts);
-        const dotsHtml = pts.map(p =>
-          `<circle cx="${p.x}" cy="${p.y}" r="3" fill="var(--chart-neutral)" stroke="var(--bg-secondary)" stroke-width="1.5"/>`
-        ).join('');
-        return `
-          <path d="${pathD}" fill="none" stroke="var(--chart-neutral)" stroke-width="2" stroke-linecap="round"/>
-          ${dotsHtml}
-        `;
       }
 
-            function renderMeasurementCard(m, isWide = false) {
+      function renderMeasurementCard(m, isWide = false) {
         if (!m) return '';
         let displayLabel = m.label || (m.kind === 'waist' ? 'Waist' : m.kind === 'biceps_r' ? 'Biceps' : m.kind === 'forearm_r' ? 'Forearm' : m.kind);
         displayLabel = displayLabel.replace(' (R)', '');
 
+        const history = m.history || [];
+        const histLen = history.length;
+        const firstEntry = histLen > 0 ? history[0] : null;
+        const latestEntry = histLen > 0 ? history[histLen - 1] : null;
+
+        // Delta between first (leftmost) and latest (rightmost) entry
+        let deltaVal = null;
+        if (histLen > 1 && firstEntry && latestEntry) {
+          deltaVal = Math.round((latestEntry.value - firstEntry.value) * 10) / 10;
+        }
+
         let deltaBadge = '<span class="text-xs text-[var(--label-tertiary)]">&mdash;</span>';
-        if (m.latest !== null && m.latest !== undefined) {
-          const histLen = m.history ? m.history.length : 0;
-          if (histLen <= 1 || m.delta_cm === null) {
-            deltaBadge = '<span class="text-[11px] font-semibold text-[var(--label-secondary)]">first entry</span>';
-          } else if (m.significant) {
-            const dir = m.delta_cm >= 0 ? 'up' : 'down';
-            deltaBadge = renderAppleArrowBadge(dir, `${Math.abs(m.delta_cm)} ${m.unit || 'cm'}`, true);
+        if (deltaVal !== null) {
+          if (deltaVal !== 0) {
+            const dir = deltaVal > 0 ? 'up' : 'down';
+            deltaBadge = renderAppleArrowBadge(dir, `${Math.abs(deltaVal)} ${m.unit || 'cm'}`);
           } else {
             deltaBadge = '<span class="text-[11px] font-semibold text-[var(--label-secondary)]">no change</span>';
           }
+        } else if (histLen === 1) {
+          deltaBadge = '<span class="text-[11px] font-semibold text-[var(--label-secondary)]">first entry</span>';
         }
 
-        const historyVals = (m.history || []).map(h => h.value);
-        const sparkW = isWide ? 280 : 120;
-        const sparkSvg = generateSparkline(historyVals, sparkW, 28);
-        const valStr = (m.latest !== null && m.latest !== undefined) ? `${m.latest} ${m.unit || 'cm'}` : 'no data';
+        // Selection state
+        const selIdx = activeMeasurementSelection[m.kind];
+        const isPointSelected = (selIdx !== undefined && selIdx !== null && history[selIdx]);
+        const activeEntry = isPointSelected ? history[selIdx] : latestEntry;
+
+        const valStr = activeEntry ? `${activeEntry.value} ${m.unit || 'cm'}` : 'no data';
+        const dateSub = isPointSelected ? formatShortDate(activeEntry.date) : (latestEntry ? formatShortDate(latestEntry.date) : (m.cadence || 'weekly'));
+
+        // Chart dimensions with room for top speech bubbles, Y-axis size labels, and X-axis date labels
+        const svgW = isWide ? 316 : 144;
+        const svgH = 82;
+        const chartTop = 22;
+        const chartBottom = 60;
+        const usableH = chartBottom - chartTop;
+        const padX = isWide ? 16 : 12;
+        const rightLabelW = isWide ? 34 : 28;
+        const plotW = svgW - padX - rightLabelW;
+
+        let chartSvg = '';
+        if (histLen === 0) {
+          chartSvg = `<line x1="0" y1="${svgH/2}" x2="${svgW}" y2="${svgH/2}" stroke="var(--chart-grid)" stroke-width="1" stroke-dasharray="2 2"/>`;
+        } else if (histLen === 1) {
+          const x = padX + plotW / 2;
+          const y = chartBottom - usableH / 2;
+          chartSvg = `<circle cx="${x}" cy="${y}" r="4" fill="var(--chart-neutral)" stroke="var(--bg-secondary)" stroke-width="1.5"/>`;
+        } else {
+          const vals = history.map(h => h.value);
+          const min = Math.min(...vals);
+          const max = Math.max(...vals);
+
+          // Pretty integer Y labels (size labels)
+          let topSizeNum = Math.ceil(max);
+          let bottomSizeNum = Math.floor(min);
+          if (topSizeNum === bottomSizeNum) {
+            topSizeNum += 1;
+            bottomSizeNum -= 1;
+          }
+          const topSizeLabel = `${topSizeNum}cm`;
+          const bottomSizeLabel = `${bottomSizeNum}cm`;
+
+          const plotMin = bottomSizeNum;
+          const plotMax = topSizeNum;
+          const plotSpan = (plotMax - plotMin) || 1.0;
+
+          const stepX = plotW / (histLen - 1);
+
+          const pts = history.map((h, i) => {
+            const x = Math.round(padX + i * stepX);
+            const clamped = Math.max(plotMin, Math.min(plotMax, h.value));
+            const y = Math.round(chartBottom - ((clamped - plotMin) / plotSpan) * usableH);
+            return { x, y, date: h.date, value: h.value, index: i };
+          });
+
+          const pathD = generateSmoothSpline(pts);
+          const hitW = Math.max(22, Math.round(stepX));
+
+          // Grid lines and Y size labels
+          const gridSvg = `
+            <text x="${svgW - 2}" y="${chartTop + 3}" fill="var(--label-secondary)" font-size="8.5" text-anchor="end" class="num">${topSizeLabel}</text>
+            <text x="${svgW - 2}" y="${chartBottom + 3}" fill="var(--label-secondary)" font-size="8.5" text-anchor="end" class="num">${bottomSizeLabel}</text>
+            <line x1="${padX}" y1="${chartTop}" x2="${svgW - rightLabelW + 2}" y2="${chartTop}" stroke="var(--chart-grid)" stroke-dasharray="2 3" stroke-width="0.8" shape-rendering="crispEdges" />
+            <line x1="${padX}" y1="${chartBottom}" x2="${svgW - rightLabelW + 2}" y2="${chartBottom}" stroke="var(--chart-grid)" stroke-width="1" shape-rendering="crispEdges" />
+          `;
+
+          // Date labels under points
+          const dateLabelsSvg = pts.map(p => {
+            const isSel = (selIdx === p.index);
+            let showLabel = false;
+            let dateText = '';
+            if (isWide) {
+              showLabel = true;
+              dateText = formatShortDate(p.date);
+            } else {
+              if (p.index === 0 || p.index === Math.floor(histLen / 2) || p.index === histLen - 1) {
+                showLabel = true;
+                dateText = formatShortDate(p.date);
+              }
+            }
+            if (!showLabel) return '';
+            return `<text x="${p.x}" y="74" fill="${isSel ? 'var(--label-primary)' : 'var(--label-secondary)'}" font-size="${isWide ? '8' : '7.5'}" font-weight="${isSel ? '700' : '500'}" text-anchor="middle">${dateText}</text>`;
+          }).join('');
+
+          // Interactive points and speech bubbles
+          const nodesSvg = pts.map(p => {
+            const isSel = (selIdx === p.index);
+            const dotFill = isSel ? '#FFFFFF' : 'var(--chart-neutral)';
+            const dotR = isSel ? 4.8 : 3.0;
+            const dotStroke = isSel ? '#000000' : 'var(--bg-secondary)';
+            const dotStrokeW = isSel ? 1.5 : 1.2;
+
+            let bubbleSvg = '';
+            if (isSel) {
+              const bW = 54;
+              const bH = 18;
+              const bX = Math.max(2, Math.min(svgW - bW - 2, p.x - bW/2));
+              const bY = Math.max(1, p.y - bH - 5);
+              bubbleSvg = `
+                <g class="speech-bubble" style="pointer-events: none;">
+                  <rect x="${bX}" y="${bY}" width="${bW}" height="${bH}" rx="4" fill="var(--bubble-bg)" stroke="rgba(255,255,255,0.25)" stroke-width="0.8" />
+                  <polygon points="${p.x - 3},${bY + bH} ${p.x + 3},${bY + bH} ${p.x},${bY + bH + 3}" fill="var(--bubble-bg)" />
+                  <text x="${bX + bW/2}" y="${bY + 12.5}" fill="#FFFFFF" font-size="8.5" font-weight="700" text-anchor="middle" class="num">${p.value} ${m.unit || 'cm'}</text>
+                </g>
+              `;
+            }
+
+            return `
+              <g onclick="handleMeasurementClick('${m.kind}', ${p.index}, event)" class="cursor-pointer" style="cursor: pointer;">
+                <circle cx="${p.x}" cy="${p.y}" r="${dotR}" fill="${dotFill}" stroke="${dotStroke}" stroke-width="${dotStrokeW}" />
+                <rect x="${p.x - hitW/2}" y="0" width="${hitW}" height="${svgH}" fill="transparent" class="cursor-pointer" style="cursor: pointer;" />
+                ${bubbleSvg}
+              </g>
+            `;
+          }).join('');
+
+          chartSvg = `
+            ${gridSvg}
+            <path d="${pathD}" fill="none" stroke="var(--chart-neutral)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            ${dateLabelsSvg}
+            ${nodesSvg}
+          `;
+        }
 
         return `
-          <div class="ios-widget-card p-3.5 flex flex-col justify-between space-y-3" style="min-height: 105px;">
+          <div class="ios-widget-card p-3.5 flex flex-col justify-between space-y-2" style="min-height: 140px;">
             <div class="flex items-center justify-between">
               <span class="text-[11px] font-semibold tracking-wider uppercase text-[var(--label-secondary)]">${displayLabel}</span>
-              <span class="text-[10px] text-[var(--label-tertiary)]">${m.cadence || 'monthly'}</span>
+              <span class="text-[10px] ${isPointSelected ? 'text-white font-bold' : 'text-[var(--label-tertiary)]'}">${dateSub}</span>
             </div>
             <div class="flex items-baseline justify-between">
               <span class="${isWide ? 'text-2xl' : 'text-xl'} font-bold tracking-tight text-[var(--label-primary)] num">${valStr}</span>
               ${deltaBadge}
             </div>
-            <div class="w-full h-7">
-              <svg viewBox="0 0 ${sparkW} 28" class="w-full h-full overflow-visible">${sparkSvg}</svg>
+            <div class="w-full h-[82px] relative pt-0.5">
+              <svg viewBox="0 0 ${svgW} ${svgH}" class="w-full h-full overflow-visible">${chartSvg}</svg>
             </div>
           </div>
         `;
@@ -985,12 +1298,28 @@
       }).join('');
 
       const selDay = workoutDays[selectedWorkoutDayIndex] || workoutDays[6];
-      let detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-2 text-center">No workout scheduled for this day</div>';
+      let detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-2 text-center">Rest day &mdash; no workout scheduled</div>';
       if (selDay && selDay.workout) {
         const w = selDay.workout;
-        detailHtml = w.note
-          ? `<div class="text-[var(--label-primary)] font-normal leading-relaxed text-xs pt-1">${w.note}</div>`
-          : '<div class="text-xs text-[var(--label-secondary)] py-1">Workout completed</div>';
+        if (w.note) {
+          const rawLines = w.note.includes('\n')
+            ? w.note.split('\n')
+            : w.note.split(/[,;]|\s—\s/).map(s => s.trim());
+          const lines = rawLines.map(s => s.replace(/^[•\-\*]\s*/, '').trim()).filter(Boolean);
+          
+          detailHtml = `
+            <div class="space-y-1.5 pt-1">
+              ${lines.map(line => `
+                <div class="flex items-start gap-2 text-xs text-[var(--label-primary)] leading-relaxed">
+                  <span class="text-[var(--accent-blue)] text-sm leading-none select-none mt-0.5">&bull;</span>
+                  <span>${line}</span>
+                </div>
+              `).join('')}
+            </div>
+          `;
+        } else {
+          detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-1">Workout completed</div>';
+        }
       } else if (workoutsList.length === 0) {
         detailHtml = '<div class="text-xs text-[var(--label-secondary)] py-2 text-center">No workouts logged yet</div>';
       }
@@ -1000,7 +1329,7 @@
         <div class="flex items-baseline justify-between pt-1">
           <div>
             <h1 class="text-3xl font-bold tracking-tight text-[var(--label-primary)] sf-display">Body</h1>
-            <div class="text-xs text-[var(--label-secondary)] mt-0.5">Workouts and measurements</div>
+            <div class="text-xs text-[var(--label-secondary)] mt-0.5">Workouts &amp; Measurements</div>
           </div>
         </div>
 
@@ -1045,6 +1374,7 @@
       if (targetTabBtn) targetTabBtn.classList.add('active');
 
       activeBarSelection = null;
+      activeMeasurementSelection = {};
 
       if (tab === 'today') loadTodayScreen();
       if (tab === 'sleep') loadSleepScreen(sleepPeriod);
@@ -1069,11 +1399,36 @@
       }
     }
 
+    function handleMeasurementClick(kind, index, event) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      triggerHaptic('light');
+      if (activeMeasurementSelection[kind] === index) {
+        delete activeMeasurementSelection[kind];
+      } else {
+        activeMeasurementSelection[kind] = index;
+      }
+      if (cachedBody) {
+        renderBody(cachedBody);
+      }
+    }
+
     function handleGlobalClick(event) {
+      let changed = false;
       if (activeBarSelection !== null) {
         activeBarSelection = null;
+        changed = true;
         if (cachedSleep[sleepPeriod]) {
           renderSleep(cachedSleep[sleepPeriod], sleepPeriod);
+        }
+      }
+      if (Object.keys(activeMeasurementSelection).length > 0) {
+        activeMeasurementSelection = {};
+        changed = true;
+        if (cachedBody) {
+          renderBody(cachedBody);
         }
       }
     }
