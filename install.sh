@@ -29,6 +29,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/priest-panel}"
+CUSTOM_DB_PATH="${DB_PATH:-}"
 DB_PATH="${DB_PATH:-/root/priest/db/life.db}"
 REPO_URL="https://github.com/h1am7a/dashboard.git"
 SERVICE_NAME="priest-panel"
@@ -88,14 +89,18 @@ TOKEN_VAL="${BOT_TOKEN:-}"
 USER_ID_VAL="${ALLOWED_USER_ID:-}"
 
 # Interactive prompt if running in a terminal and variables not set
-if [ -z "$TOKEN_VAL" ] && [ -t 0 ]; then
-  echo -e "${C_YELLOW}[?] Enter your Telegram Bot Token (from @BotFather) [or press Enter to configure later]:${C_RESET} "
-  read -r TOKEN_VAL || true
-fi
+if [ -f "$ENV_FILE" ] && grep -q "^BOT_TOKEN=.." "$ENV_FILE" && [ -z "$TOKEN_VAL" ]; then
+  echo -e "    ${C_GREEN}[✓] Preserving existing Telegram credentials from ${ENV_FILE}${C_RESET}"
+else
+  if [ -z "$TOKEN_VAL" ] && [ -t 0 ]; then
+    echo -e "${C_YELLOW}[?] Enter your Telegram Bot Token (from @BotFather) [or press Enter to configure later]:${C_RESET} "
+    read -r TOKEN_VAL || true
+  fi
 
-if [ -z "$USER_ID_VAL" ] && [ -t 0 ]; then
-  echo -e "${C_YELLOW}[?] Enter your Telegram User ID (from @userinfobot) [or press Enter to configure later]:${C_RESET} "
-  read -r USER_ID_VAL || true
+  if [ -z "$USER_ID_VAL" ] && [ -t 0 ]; then
+    echo -e "${C_YELLOW}[?] Enter your Telegram User ID (from @userinfobot) [or press Enter to configure later]:${C_RESET} "
+    read -r USER_ID_VAL || true
+  fi
 fi
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -110,16 +115,21 @@ EOF
   chmod 600 "$ENV_FILE"
   echo "    Created ${ENV_FILE}"
 else
-  # Update existing .env if tokens or DB_PATH were provided
+  # Update existing .env if tokens were provided
   if [ -n "$TOKEN_VAL" ]; then
     sed -i "s|^BOT_TOKEN=.*|BOT_TOKEN=${TOKEN_VAL}|" "$ENV_FILE"
   fi
   if [ -n "$USER_ID_VAL" ]; then
     sed -i "s|^ALLOWED_USER_ID=.*|ALLOWED_USER_ID=${USER_ID_VAL}|" "$ENV_FILE"
   fi
-  if grep -q "^DB_PATH=" "$ENV_FILE"; then
-    sed -i "s|^DB_PATH=.*|DB_PATH=${DB_PATH}|" "$ENV_FILE"
-  else
+  # Update DB_PATH if user explicitly provided CUSTOM_DB_PATH or missing in .env
+  if [ -n "$CUSTOM_DB_PATH" ]; then
+    if grep -q "^DB_PATH=" "$ENV_FILE"; then
+      sed -i "s|^DB_PATH=.*|DB_PATH=${DB_PATH}|" "$ENV_FILE"
+    else
+      echo "DB_PATH=${DB_PATH}" >> "$ENV_FILE"
+    fi
+  elif ! grep -q "^DB_PATH=" "$ENV_FILE"; then
     echo "DB_PATH=${DB_PATH}" >> "$ENV_FILE"
   fi
   sed -i "/^PRIEST_DB=/d" "$ENV_FILE" 2>/dev/null || true

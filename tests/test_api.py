@@ -188,3 +188,38 @@ def test_static_assets():
     res = client.get("/")
     assert res.status_code == 200
     assert "text/html" in res.headers.get("content-type", "")
+
+
+def test_dynamic_facts_and_habits_titles_and_targets():
+    # 1. Test custom facts for wake, bed, and sleep targets
+    store.set_fact("wake_target", "08:15")
+    store.set_fact("bed_target", "00:30")
+    store.set_fact("sleep_target", "8.0")
+
+    res_sleep = client.get("/api/sleep?days=7")
+    assert res_sleep.status_code == 200
+    sleep_data = res_sleep.json()
+    assert sleep_data["target_wake"] == "08:15"
+    assert sleep_data["target_bed"] == "00:30"
+    assert sleep_data["target_hours"] == 8.0
+
+    res_today = client.get("/api/today")
+    assert res_today.status_code == 200
+    today_data = res_today.json()
+    assert today_data["sleep"]["target"] == "08:15"
+    assert today_data["sleep"]["target_wake"] == "08:15"
+    assert today_data["sleep"]["target_bed"] == "00:30"
+    assert today_data["sleep"]["target_hours"] == 8.0
+
+    # 2. Test custom habit title in database reflects in today items
+    with store.session() as con:
+        con.execute(
+            "INSERT INTO habits(key, title, rule, active_from, sort) "
+            "VALUES('custom_reading', 'Read 20 pages of book', '{\"t\": \"metric_ge\", \"kind\": \"read_pages\", \"value\": 20}', '2026-01-01', 99)"
+        )
+
+    res_today_custom = client.get("/api/today")
+    items = res_today_custom.json()["score"]["items"]
+    custom_item = next((it for it in items if it["key"] == "custom_reading"), None)
+    assert custom_item is not None
+    assert custom_item["title"] == "Read 20 pages of book"

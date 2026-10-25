@@ -87,23 +87,114 @@ def _hhmm(hours: float | str | None) -> str | None:
         return str(hours)
 
 
-def _wake_target() -> tuple[int, str]:
-    """Цель подъёма из facts.wake_target: (минуты от полуночи, 'HH:MM')."""
-    with store.session() as c:
-        row = c.execute("SELECT value FROM facts WHERE key='wake_target'").fetchone()
-    raw = row["value"] if row else "14:30"
-    m = re.search(r"(\d{1,2}):(\d{2})", raw or "")
+def _parse_time_str_or_float(val: str | float | int | None) -> tuple[int, str] | tuple[None, None]:
+    if val is None:
+        return None, None
+    s = str(val).strip()
+    if not s:
+        return None, None
+    m = re.search(r"(\d{1,2}):(\d{2})", s)
     if m:
-        minutes = int(m.group(1)) * 60 + int(m.group(2))
-    else:
-        minutes = 14 * 60 + 30
-    return minutes, f"{minutes // 60:02d}:{minutes % 60:02d}"
+        h, mn = int(m.group(1)), int(m.group(2))
+        return (h * 60 + mn), f"{h:02d}:{mn:02d}"
+    try:
+        f = float(s)
+        if f.is_integer():
+            h = int(f)
+            return (h * 60) % (24 * 60), f"{h % 24:02d}:00"
+        h = int(f)
+        frac = round(f - h, 4)
+        if frac == 0.5:
+            mn = 30
+        elif frac == 0.25:
+            mn = 15
+        elif frac == 0.75:
+            mn = 45
+        elif frac < 0.60:
+            mn = int(round(frac * 100))
+        else:
+            mn = int(round(frac * 60))
+        return (h * 60 + mn) % (24 * 60), f"{h % 24:02d}:{mn:02d}"
+    except (ValueError, TypeError):
+        pass
+    return None, None
+
+
+def _wake_target() -> tuple[int, str]:
+    """Цель подъёма из facts (wake_target/target_wake): (минуты от полуночи, 'HH:MM')."""
+    with store.session() as c:
+        row = c.execute(
+            "SELECT value FROM facts WHERE key IN ('wake_target', 'target_wake') "
+            "ORDER BY CASE key WHEN 'wake_target' THEN 1 ELSE 2 END LIMIT 1"
+        ).fetchone()
+    if row and row["value"]:
+        mins, s = _parse_time_str_or_float(row["value"])
+        if mins is not None and s is not None:
+            return mins, s
+    return 7 * 60 + 30, "07:30"
 
 
 def _bed_target() -> str:
+    """Цель отбоя из facts (bed_target/target_bed): 'HH:MM'."""
     with store.session() as c:
-        row = c.execute("SELECT value FROM facts WHERE key='bed_target'").fetchone()
-    return row["value"] if row else "23:30"
+        row = c.execute(
+            "SELECT value FROM facts WHERE key IN ('bed_target', 'target_bed') "
+            "ORDER BY CASE key WHEN 'bed_target' THEN 1 ELSE 2 END LIMIT 1"
+        ).fetchone()
+    if row and row["value"]:
+        _, s = _parse_time_str_or_float(row["value"])
+        if s is not None:
+            return s
+        return str(row["value"])
+    return "23:30"
+
+
+def _sleep_target() -> float:
+    """Цель сна из facts (sleep_target/target_hours) или habits: количество часов (float)."""
+    with store.session() as c:
+        keys = ("sleep_target", "sleep_target_hours", "target_sleep", "target_hours", "sleep_hours_target", "sleep_hours")
+        placeholders = ",".join("?" for _ in keys)
+        row = c.execute(
+            f"SELECT key, value FROM facts WHERE key IN ({placeholders}) "
+            "ORDER BY CASE key "
+            "WHEN 'sleep_target' THEN 1 "
+            "WHEN 'sleep_target_hours' THEN 2 "
+            "WHEN 'target_sleep' THEN 3 "
+            "WHEN 'target_hours' THEN 4 "
+            "ELSE 5 END LIMIT 1",
+            keys,
+        ).fetchone()
+        if row and row["value"]:
+            try:
+                val = float(str(row["value"]).replace(",", "."))
+                if 0 < val <= 24:
+                    return val
+            except ValueError:
+                pass
+
+        hrow = c.execute(
+            "SELECT rule FROM habits WHERE (key LIKE '%sleep%' OR rule LIKE '%sleep_hours%') "
+            "ORDER BY sort LIMIT 1"
+        ).fetchone()
+        if hrow and hrow["rule"]:
+            try:
+                rule = json.loads(hrow["rule"])
+                if rule.get("kind") == "sleep_hours" and "value" in rule:
+                    return float(rule["value"])
+            except Exception:
+                pass
+
+        w_row = c.execute("SELECT value FROM facts WHERE key IN ('wake_target', 'target_wake') LIMIT 1").fetchone()
+        b_row = c.execute("SELECT value FROM facts WHERE key IN ('bed_target', 'target_bed') LIMIT 1").fetchone()
+        if w_row and b_row and w_row["value"] and b_row["value"]:
+            w_min, _ = _parse_time_str_or_float(w_row["value"])
+            b_min, _ = _parse_time_str_or_float(b_row["value"])
+            if w_min is not None and b_min is not None:
+                diff_min = (w_min - b_min) % (24 * 60)
+                if diff_min > 0:
+                    return round(diff_min / 60, 1)
+
+    return 7.5
 
 
 def _mood_label(value) -> str | None:
@@ -194,6 +285,9 @@ def today(
             "bed": _hhmm(row["bed_time"] if row else None),
             "wake": _hhmm(wake),
             "target": target_str,
+            "target_wake": target_str,
+            "target_bed": _bed_target(),
+            "target_hours": _sleep_target(),
             "delta_min": delta,
         },
         "mood": {
@@ -284,7 +378,7 @@ def sleep(
         "avg_wake": avg_wake_str,
         "avg_bed": avg_bed_str,
         "avg_delta_min": avg_delta,
-        "target_hours": 7.5,
+        "target_hours": _sleep_target(),
         "target_wake": target_str,
         "target_bed": _bed_target(),
         "series": series,
